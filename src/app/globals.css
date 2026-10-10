@@ -273,6 +273,98 @@
     color: var(--color-ivory);
   }
 
+  /* ---------- mobile menu ---------- */
+  .menu-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 12px;
+    background: transparent;
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+    color: var(--color-ivory);
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .menu-icon {
+    position: relative;
+    width: 16px;
+    height: 1.5px;
+    background: currentColor;
+    box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor;
+  }
+  .menu-icon[data-open] {
+    background: transparent;
+    box-shadow: none;
+  }
+  .menu-icon[data-open]::before,
+  .menu-icon[data-open]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: currentColor;
+    transform: rotate(45deg);
+  }
+  .menu-icon[data-open]::after {
+    transform: rotate(-45deg);
+  }
+  .mobile-menu {
+    position: fixed;
+    inset: var(--header-h) 0 auto 0;
+    max-height: calc(100svh - var(--header-h));
+    overflow-y: auto;
+    display: grid;
+    gap: 16px;
+    padding: 8px var(--gutter) 24px;
+    background: var(--color-ink);
+    border-bottom: 1px solid var(--color-line);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    transform: translateY(-8px);
+    visibility: hidden;
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease,
+      visibility 0s linear 0.2s;
+  }
+  .mobile-menu[data-open] {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+  .mobile-menu ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .mobile-menu-link {
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    border-bottom: 1px solid var(--color-line);
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    text-decoration: none;
+  }
+  .mobile-menu-link:hover {
+    color: var(--color-gold);
+  }
+  /* very narrow phones: the header keeps brand + menu; Reserve lives in the menu */
+  @media (max-width: 399px) {
+    .header-cta {
+      display: none;
+    }
+  }
+
   /* ---------- 3D stage ---------- */
   .stage-layer {
     position: sticky;
@@ -738,7 +830,7 @@
       content: "";
       position: absolute;
       inset: 0;
-      background: linear-gradient(180deg, transparent 46%, rgba(15, 14, 12, 0.9) 60%, var(--color-ink) 72%);
+      background: linear-gradient(180deg, transparent 44%, rgba(15, 14, 12, 0.92) 56%, var(--color-ink) 68%);
       pointer-events: none;
     }
     .stage-poster,

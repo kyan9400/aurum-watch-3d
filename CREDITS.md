@@ -6,7 +6,8 @@ Everything visual on this site was written in code for this project:
   (`LatheGeometry`, `ExtrudeGeometry`, `TubeGeometry`, custom `BufferGeometry`, `InstancedMesh`).
 - Dial faces, leather, alligator and silk straps and the rotor engraving are drawn at runtime on a `<canvas>`.
 - Reflections come from code-made light panels (drei `<Environment>` + `<Lightformer>`); no HDRI is downloaded.
-- The poster drawing, the family dials, the favicon and the Open Graph image are SVG / JSX written for this project.
+- The poster drawing, the family dials and the favicon are SVG / JSX written for this project. The Open Graph / Twitter
+  image is a screenshot of this site.
 
 No third-party models, textures, HDRIs, photos, icons or audio are used. No CC0 assets were needed.
 

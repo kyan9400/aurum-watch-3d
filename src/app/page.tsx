@@ -3,6 +3,7 @@ import Configurator from "@/components/Configurator";
 import ExplodedLegend from "@/components/ExplodedLegend";
 import ReserveButton from "@/components/ReserveButton";
 import MiniDial from "@/components/MiniDial";
+import MobileMenu from "@/components/MobileMenu";
 import { MotionNotice, MotionToggle } from "@/components/MotionToggle";
 
 const NAV = [
@@ -84,8 +85,8 @@ export default function Home() {
             <span aria-hidden="true" className="brand-mark" />
             Aurum
           </a>
-          <nav aria-label="Main">
-            <ul className="hidden items-center gap-1 md:flex">
+          <nav aria-label="Main" className="hidden md:block">
+            <ul className="flex items-center gap-1">
               {NAV.map((n) => (
                 <li key={n.href}>
                   <a className="nav-link" href={n.href}>
@@ -97,9 +98,10 @@ export default function Home() {
           </nav>
           <div className="flex items-center gap-2">
             <MotionToggle className="hidden sm:inline-flex md:hidden lg:inline-flex" />
-            <a href="#reserve" className="btn btn-outline">
+            <a href="#reserve" className="btn btn-outline header-cta">
               Reserve
             </a>
+            <MobileMenu links={NAV} cta={{ href: "#reserve", label: "Reserve your Meridian" }} />
           </div>
         </div>
       </header>

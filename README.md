@@ -64,7 +64,7 @@ Set `NEXT_PUBLIC_SITE_URL` to the deployed URL so Open Graph, canonical, robots 
 
 ## Project layout
 ```
-src/app/            layout, page, 404, OG image, icon, robots, sitemap
+src/app/            layout, page, 404, social preview image, icon, robots, sitemap
 src/components/     page UI (configurator, legend, poster, motion toggle, stage)
 src/components/three/
   WatchCanvas.tsx   Canvas, environment, loop driver, adaptive DPR, warm-up
@@ -75,7 +75,7 @@ src/lib/            options/prices, config store, motion preference, quality tie
 ```
 
 ## Credits & licenses
-All 3D, textures and images are made in code for this project. Fonts are Google Fonts under the SIL Open Font License.
+All 3D, textures and images are made in code for this project (the social preview is a screenshot of the site). Fonts are Google Fonts under the SIL Open Font License.
 Libraries are MIT / Apache-2.0. Full list in [CREDITS.md](CREDITS.md).
 
 ## Copyright
