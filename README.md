@@ -4,7 +4,7 @@ A product configurator for a fictional watchmaker, built around one real-time 3D
 The hero watch shows your local time and ticks. The configurator changes its case metal, dial and strap live. Scroll on
 and the watch comes apart into six layers so you can see the movement.
 
-**Live:** <!-- LIVE_URL -->
+**Live:** https://aurum-watch-3d.vercel.app
 
 > Concept project — fictional brand.
 
