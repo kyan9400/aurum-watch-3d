@@ -50,12 +50,15 @@ A procedural wristwatch, 100% code-made, on one sticky `<Canvas frameloop="deman
 **Performance**
 - Render on demand: frames only for ticks (≈12 frames per second-tick), colour fades, scroll changes, drag, and the
   slow idle sway (full motion only, stage in view, tab visible). Idle otherwise.
+- The lazy 3D chunk is imported only after window `load` + `requestIdleCallback` (2.5 s timeout), never during
+  hydration, and not at all on a software renderer (SwiftShader / llvmpipe / Basic Render, or a
+  `failIfMajorPerformanceCaveat` refusal): those keep the poster. `?quality=` forces the 3D on.
 - Quality tier picked before the Canvas from a probe context (GPU name, cores, memory, touch). `?quality=` overrides.
   - **High**: DPR cap 2, MSAA, physical crystal with clearcoat, env map 256, 32-segment gears, 40 bracelet links.
   - **Medium**: DPR cap 1.5, MSAA, standard crystal, env 128, 20-segment gears.
   - **Low**: DPR cap 1, no MSAA, env 64, simplified gears, no sway.
-- drei `<PerformanceMonitor>` drops DPR on decline. No allocations in `useFrame`. Shaders warmed with
-  `gl.compileAsync` behind the poster, canvas fades in after.
+- drei `<PerformanceMonitor>` drops DPR on decline. No allocations in `useFrame`. The watch is built in slices that
+  yield to the main thread; shaders warmed with `gl.compileAsync` behind the poster, canvas fades in (opacity) after.
 - IntersectionObserver pauses everything when the stage is off-screen; `visibilitychange` pauses the tick timer.
 
 **Reduced motion** (default when the OS asks; "Turn on full motion" toggle in the header strip and footer, stored in
@@ -63,7 +66,7 @@ localStorage, `?motion=full|reduced`): no idle sway, no camera sweeps between se
 without the spring. The exploded view still follows the scroll directly.
 
 **No WebGL / context lost**: a code-made SVG poster of the watch (same palette) is in the server HTML, shown until the
-3D is ready and kept if WebGL is missing or the context is lost. The configurator still works (the poster recolours).
+3D is ready and kept if WebGL is missing, the renderer is software-only, or the context is lost. The configurator still works (the poster recolours).
 
 ## 5. Design system
 **Palette**

@@ -2,11 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { probeGPU, type Probe } from "@/lib/quality";
+import { probeGPU, wants3D, type Probe } from "@/lib/quality";
 import { readStage, type StagePhases } from "@/lib/stage";
 import WatchPoster from "./WatchPoster";
 
-// three.js + R3F live in this lazy chunk only; the page HTML never waits for it
+// three.js + R3F live in this lazy chunk only; the page HTML never waits for it.
+// It is requested only after window "load" + an idle callback, and never on a software renderer.
 const WatchCanvas = dynamic(() => import("./three/WatchCanvas"), { ssr: false });
 
 type Phase = "hero" | "configure" | "movement";
@@ -17,14 +18,14 @@ export default function Stage({ children }: { children: ReactNode }) {
   const [lost, setLost] = useState(false);
   const [phase, setPhase] = useState<Phase>("hero");
 
-  // decide WebGL + quality tier once the page is idle, before any Canvas exists
+  // decide WebGL + quality tier after load, once the main thread is idle (never during hydration)
   useEffect(() => {
     let idleId = 0;
     let timeoutId = 0;
     const run = () => setProbe(probeGPU());
     const schedule = () => {
-      if (typeof window.requestIdleCallback === "function") idleId = window.requestIdleCallback(run, { timeout: 1200 });
-      else timeoutId = window.setTimeout(run, 200);
+      if (typeof window.requestIdleCallback === "function") idleId = window.requestIdleCallback(run, { timeout: 2500 });
+      else timeoutId = window.setTimeout(run, 1200);
     };
     if (document.readyState === "complete") schedule();
     else window.addEventListener("load", schedule, { once: true });
@@ -56,7 +57,7 @@ export default function Stage({ children }: { children: ReactNode }) {
     setReady(false);
   }, []);
 
-  const show3D = !!probe?.webgl && !lost;
+  const show3D = !!probe && wants3D(probe) && !lost;
   const posterVisible = !ready || !show3D;
 
   return (

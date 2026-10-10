@@ -1,7 +1,7 @@
 /* Quality tier, decided BEFORE the Canvas exists.
    One throwaway WebGL context tells us whether 3D works at all and which GPU this is.
-   Software renderers -> low; integrated / mobile GPUs and touch devices -> at most medium.
-   ?quality=low|medium|high overrides. */
+   Software renderers -> no 3D at all (the poster stays); integrated / mobile GPUs and touch devices -> at most medium.
+   ?quality=low|medium|high overrides (and forces the 3D on, even on a software renderer). */
 
 export type Tier = "low" | "medium" | "high";
 
@@ -26,13 +26,30 @@ function isTier(v: string | null): v is Tier {
 }
 
 function gpuName(gl: WebGLRenderingContext | WebGL2RenderingContext) {
-  const name = String(gl.getParameter(gl.RENDERER) || "");
-  if (!/^webkit/i.test(name)) return name;
   const info = gl.getExtension("WEBGL_debug_renderer_info");
-  return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || name) : name;
+  const name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  return String(name || "");
 }
 
-export type Probe = { webgl: boolean; tier: Tier; gpu: string };
+/** CPU-only WebGL (SwiftShader, llvmpipe, softpipe, Microsoft Basic Render, Mesa offscreen). */
+export const SOFTWARE_GPU = /swiftshader|llvmpipe|softpipe|software|basic render|mesa offscreen/i;
+
+function makeContext(attrs: WebGLContextAttributes) {
+  try {
+    // three r163+ renders with WebGL 2 only, so a WebGL 1-only browser gets the poster instead of a crash
+    return document.createElement("canvas").getContext("webgl2", attrs);
+  } catch {
+    return null;
+  }
+}
+
+function release(gl: WebGL2RenderingContext) {
+  gl.getExtension("WEBGL_lose_context")?.loseContext();
+}
+
+/** webgl: a WebGL 2 context can be made at all. software: it runs on the CPU, so the 3D is skipped
+    (the poster stays) unless ?quality= forces it on. Never imports three. */
+export type Probe = { webgl: boolean; software: boolean; forced: boolean; tier: Tier; gpu: string };
 
 export function probeGPU(): Probe {
   let forced: string | null = null;
@@ -41,19 +58,22 @@ export function probeGPU(): Probe {
   } catch {
     forced = null;
   }
-  let gl: WebGL2RenderingContext | WebGLRenderingContext | null = null;
-  try {
-    const canvas = document.createElement("canvas");
-    // three r163+ renders with WebGL 2 only, so a WebGL 1-only browser gets the poster instead of a crash
-    gl = canvas.getContext("webgl2", { powerPreference: "high-performance" });
-  } catch {
-    gl = null;
+  const isForced = isTier(forced);
+
+  // failIfMajorPerformanceCaveat refuses software rasterisers in most browsers
+  let gl = makeContext({ failIfMajorPerformanceCaveat: true, powerPreference: "high-performance" });
+  let caveat = false;
+  if (!gl) {
+    gl = makeContext({ powerPreference: "high-performance" });
+    caveat = !!gl;
   }
-  if (!gl) return { webgl: false, tier: "low", gpu: "" };
+  if (!gl) return { webgl: false, software: false, forced: isForced, tier: "low", gpu: "" };
 
   const gpu = gpuName(gl);
-  gl.getExtension("WEBGL_lose_context")?.loseContext();
-  if (isTier(forced)) return { webgl: true, tier: forced, gpu };
+  release(gl);
+  const software = caveat || SOFTWARE_GPU.test(gpu);
+  if (isTier(forced)) return { webgl: true, software, forced: true, tier: forced, gpu };
+  if (software) return { webgl: true, software, forced: false, tier: "low", gpu };
 
   const nav = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
   const cores = nav.hardwareConcurrency || 4;
@@ -64,8 +84,12 @@ export function probeGPU(): Probe {
   if (nav.connection?.saveData || cores <= 2 || memory <= 2) tier = "low";
   else if (touch || cores <= 4 || memory <= 4) tier = "medium";
 
-  if (/swiftshader|llvmpipe|software|basic render/i.test(gpu)) tier = "low";
-  else if (/intel|uhd|iris|mali|adreno|powervr|apple gpu|radeon\(tm\)|radeon graphics|vega \d/i.test(gpu) && tier === "high")
+  if (/intel|uhd|iris|mali|adreno|powervr|apple gpu|radeon(tm)|radeon graphics|vega d/i.test(gpu) && tier === "high")
     tier = "medium";
-  return { webgl: true, tier, gpu };
+  return { webgl: true, software, forced: false, tier, gpu };
+}
+
+/** Should the 3D chunk load at all? Software renderers get the poster unless ?quality= forces 3D. */
+export function wants3D(p: Probe) {
+  return p.webgl && (!p.software || p.forced);
 }

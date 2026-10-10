@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer } from "@react-three/drei";
 import { TIERS, type Tier } from "@/lib/quality";
@@ -38,18 +38,38 @@ export default function WatchCanvas({ tier, onReady, onLost }: Props) {
   );
 }
 
+/* Builds the watch in slices (yielding between them), then hands it to the live rig. */
 function WatchRig({ tier, onReady, onLost }: Props) {
+  const gl = useThree((s) => s.gl);
+  const [model, setModel] = useState<WatchModel | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let built: WatchModel | null = null;
+    WatchModel.create(TIERS[tier], getConfig(), Math.min(8, gl.capabilities.getMaxAnisotropy()), () => cancelled).then((m) => {
+      if (cancelled) {
+        m?.dispose();
+        return;
+      }
+      built = m;
+      setModel(m);
+    });
+    return () => {
+      cancelled = true;
+      built?.dispose();
+    };
+  }, [tier, gl]);
+
+  return model ? <LiveWatch model={model} tier={tier} onReady={onReady} onLost={onLost} /> : null;
+}
+
+function LiveWatch({ model, tier, onReady, onLost }: Props & { model: WatchModel }) {
   const settings = TIERS[tier];
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const camera = useThree((s) => s.camera);
   const invalidate = useThree((s) => s.invalidate);
   const setDpr = useThree((s) => s.setDpr);
-
-  const model = useMemo(
-    () => new WatchModel(settings, getConfig(), Math.min(8, gl.capabilities.getMaxAnisotropy())),
-    [settings, gl],
-  );
 
   // mutable per-frame state lives in one ref (never React state)
   const live = useRef({
@@ -64,8 +84,6 @@ function WatchRig({ tier, onReady, onLost }: Props) {
     lastRaise: -1e9,
     bounces: 0,
   });
-
-  useEffect(() => () => model.dispose(), [model]);
 
   // scroll -> phase targets, config -> materials, motion preference, visibility, tick timer, drag
   useEffect(() => {
@@ -184,7 +202,10 @@ function WatchRig({ tier, onReady, onLost }: Props) {
       .then(() => {
         if (cancelled) return;
         model.redrawText();
-        return gl.compileAsync(scene, camera);
+        // let the browser breathe before the shader compile
+        return new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() => {
+          if (!cancelled) return gl.compileAsync(scene, camera);
+        });
       })
       .catch(() => undefined)
       .then(() => {

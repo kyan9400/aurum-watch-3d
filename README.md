@@ -32,12 +32,17 @@ A procedural wristwatch on one sticky `<Canvas frameloop="demand">` spanning the
 ### Performance
 - Render on demand: frames only for the once-a-second tick (with a short spring), colour fades, scroll, drag and the hero
   sway. Idle otherwise; paused off-screen (IntersectionObserver) and in hidden tabs.
-- Quality tier from a throwaway WebGL probe before the Canvas is created (GPU name, cores, memory, touch;
-  `?quality=low|medium|high` overrides). Tiers change DPR cap (2 / 1.5 / 1), MSAA, environment resolution, physical
+- The 3D chunk (three, R3F, drei) is requested only after window `load` plus an idle callback, never during
+  hydration. Before that, a throwaway WebGL probe (no three import) reads the GPU name; software renderers
+  (SwiftShader, llvmpipe, Microsoft Basic Render, or a `failIfMajorPerformanceCaveat` refusal) skip the 3D entirely and
+  keep the poster.
+- Quality tier from the same probe, before the Canvas is created (GPU name, cores, memory, touch;
+  `?quality=low|medium|high` overrides and forces the 3D on). Tiers change DPR cap (2 / 1.5 / 1), MSAA, environment resolution, physical
   materials and curve detail.
 - Adaptive resolution measured only on consecutive frames, so render-on-demand gaps are not mistaken for a slow GPU
   (drei `PerformanceMonitor` would read those gaps as low fps).
-- Shaders are compiled with `gl.compileAsync` behind a code-drawn SVG poster; the canvas fades in when ready.
+- The watch is built in slices that yield to the main thread, then shaders are compiled with `gl.compileAsync` behind
+  a code-drawn SVG poster; the canvas fades in (opacity only) when ready.
 - No allocations in the frame loop; the watch is a plain three.js object graph updated by one function.
 - No `backdrop-filter` anywhere; panels over the canvas are solid or gradient.
 
@@ -45,7 +50,7 @@ A procedural wristwatch on one sticky `<Canvas frameloop="demand">` spanning the
 - `prefers-reduced-motion` is respected by default, with a "Turn on full motion" toggle (header, footer and a first-visit
   notice), remembered in localStorage; `?motion=full|reduced` overrides. Reduced motion cuts between poses, stops the
   sway and the movement animation, and lets the seconds hand jump. The exploded view still follows the scroll.
-- Without WebGL, or if the context is lost, the SVG poster stays and follows the configurator, so the page works fully.
+- Without WebGL, on a software renderer, or if the context is lost, the SVG poster stays and follows the configurator, so the page works fully.
 
 ## Run it
 ```bash

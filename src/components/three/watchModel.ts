@@ -37,6 +37,9 @@ export type FrameInput = {
 type Pose = { x: number; y: number; s: number; rx: number; ry: number; rz: number; spread: number };
 
 const TAU = Math.PI * 2;
+
+/** Let the browser handle input and paint before the next slice of work. */
+const yieldToMain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const damp = (cur: number, to: number, lambda: number, dt: number) => cur + (to - cur) * (1 - Math.exp(-lambda * dt));
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -47,34 +50,34 @@ const LAYER_OFFSETS = { crystal: 3.0, hands: 2.1, dial: 1.2, case: 0, movement: 
 export class WatchModel {
   readonly root = new Group();
   private inner = new Group();
-  private layers: Record<keyof typeof LAYER_OFFSETS, Group>;
+  private layers!: Record<keyof typeof LAYER_OFFSETS, Group>;
   private strapTop = new Group();
   private strapBottom = new Group();
-  private hour: Mesh;
-  private minute: Mesh;
-  private second: Mesh;
+  private hour!: Mesh;
+  private minute!: Mesh;
+  private second!: Mesh;
   private gears: Mesh[] = [];
-  private balance: Mesh;
-  private rotor: Mesh;
+  private balance!: Mesh;
+  private rotor!: Mesh;
 
   private geos: BufferGeometry[] = [];
   private mats: Material[] = [];
   private textures: CanvasTexture[] = [];
 
-  private caseMat: MeshStandardMaterial | MeshPhysicalMaterial;
-  private braceletOuterMat: MeshStandardMaterial;
-  private trimMat: MeshStandardMaterial;
-  private dialMat: MeshStandardMaterial;
-  private rehautMat: MeshStandardMaterial;
-  private strapMat: MeshStandardMaterial;
+  private caseMat!: MeshStandardMaterial | MeshPhysicalMaterial;
+  private braceletOuterMat!: MeshStandardMaterial;
+  private trimMat!: MeshStandardMaterial;
+  private dialMat!: MeshStandardMaterial;
+  private rehautMat!: MeshStandardMaterial;
+  private strapMat!: MeshStandardMaterial;
   private leather: Mesh[] = [];
   private bracelet: InstancedMesh[] = [];
 
-  private dialCanvas: HTMLCanvasElement;
-  private dialTex: CanvasTexture;
-  private strapCanvas: HTMLCanvasElement;
-  private strapTex: CanvasTexture;
-  private rotorTex: CanvasTexture;
+  private dialCanvas!: HTMLCanvasElement;
+  private dialTex!: CanvasTexture;
+  private strapCanvas!: HTMLCanvasElement;
+  private strapTex!: CanvasTexture;
+  private rotorTex!: CanvasTexture;
 
   // targets for the material cross-fade
   private caseColor = new Color();
@@ -85,8 +88,8 @@ export class WatchModel {
   private caseCoat = 0;
 
   private current: WatchConfig | null = null;
-  private dial: DialOption;
-  private strap: StrapOption;
+  private dial!: DialOption;
+  private strap!: StrapOption;
   private pendingDial: DialOption | null = null;
   private pendingStrap: StrapOption | null = null;
   private dialK = 1;
@@ -106,8 +109,27 @@ export class WatchModel {
   private poseB: Pose = { x: 0, y: 0, s: 1, rx: 0, ry: 0, rz: 0, spread: 0 };
   private poseC: Pose = { x: 0, y: 0, s: 1, rx: 0, ry: 0, rz: 0, spread: 0 };
 
-  constructor(settings: TierSettings, config: WatchConfig, anisotropy: number) {
+  /** Build the watch in a few slices, yielding to the main thread between them,
+      so a slow phone never sees one long blocking task. */
+  static async create(settings: TierSettings, config: WatchConfig, anisotropy: number, isCancelled: () => boolean) {
+    const model = new WatchModel(settings);
+    const steps = model.build(config, anisotropy);
+    while (!steps.next().done) {
+      await yieldToMain();
+      if (isCancelled()) {
+        model.dispose();
+        return null;
+      }
+    }
+    return model;
+  }
+
+  private constructor(settings: TierSettings) {
     this.settings = settings;
+  }
+
+  private *build(config: WatchConfig, anisotropy: number): Generator<void, void, void> {
+    const settings = this.settings;
     const seg = settings.curveSegments >= 10 ? 128 : settings.curveSegments >= 6 ? 96 : 64;
     const cs = settings.curveSegments;
     const physical = settings.physicalCrystal;
@@ -179,6 +201,8 @@ export class WatchModel {
     this.textures.push(this.rotorTex);
     const rotorMat = mat(new MeshStandardMaterial({ map: this.rotorTex, metalness: 1, roughness: 0.3 }));
 
+    yield;
+
     /* case */
     const caseL = this.layers.case;
     caseL.add(new Mesh(geo(G.caseMiddle(seg)), this.caseMat));
@@ -198,6 +222,8 @@ export class WatchModel {
     indices.instanceMatrix.needsUpdate = true;
     dialL.add(indices);
 
+    yield;
+
     /* hands */
     const handsL = this.layers.hands;
     this.hour = new Mesh(geo(G.hourHand(cs)), this.trimMat);
@@ -213,6 +239,8 @@ export class WatchModel {
     /* crystal */
     this.layers.crystal.add(new Mesh(geo(G.crystalDome(seg)), crystalMat));
     this.layers.crystal.renderOrder = 2;
+
+    yield;
 
     /* movement */
     const mv = this.layers.movement;
@@ -252,10 +280,14 @@ export class WatchModel {
     this.rotor.rotation.z = 0.6;
     movementInner.add(this.rotor);
 
+    yield;
+
     /* caseback */
     const back = this.layers.caseback;
     back.add(new Mesh(geo(G.casebackRing(seg)), this.caseMat));
     back.add(new Mesh(geo(G.casebackGlass(seg)), crystalMat));
+
+    yield;
 
     /* straps: leather ribbon + bracelet links, one of the two is visible */
     const samples = settings.curveSegments >= 6 ? 48 : 28;
