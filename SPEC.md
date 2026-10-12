@@ -59,6 +59,20 @@ A procedural wristwatch, 100% code-made, on one sticky `<Canvas frameloop="deman
 - Materials: polished and brushed case metals. On high both are `MeshPhysicalMaterial`, the brushed one with
   anisotropy 0.75. The sunburst dial uses an anisotropy map with tangential direction. The crystal has iridescence 0.35.
 
+**Look (visual redesign)**
+- Open heart: the dial has a 0.225 aperture at 6 o'clock (canvas cut-out + `alphaTest`, polished bezel ring, dark
+  sleeve). The 6 o'clock index is dropped and the dial text moved to the upper half. The balance (moved to 0, -0.37,
+  r 0.2, cock bridge redrawn) swings in it in the hero too (full motion, medium/high), so the movement is alive from the
+  first frame.
+- Atmosphere, all in the scene behind the watch: a warm additive halo, a giant engraved chapter ring (Roman hours,
+  240-step minute track, rose-engine guilloché band; one canvas texture) tilted like an orbit, and a slanted light shaft
+  from the upper right with drifting dust (160 points on high, 80 on medium, none on low). Each chapter has its own
+  light: hero warm amber with the shaft, configurator softer champagne with a flat, quieter ring, movement a cool steel
+  halo with a larger ring that turns with the scroll. With reduced motion everything is static and cuts between states.
+- Lighting: darker ambient, a warm rim light from behind-left, plus a tall amber softbox and a cool steel kicker in the
+  Lightformer studio, so polished gold reads warm on one flank and cool on the other. Calf leather is toned down (×0.55)
+  so it reads cognac rather than orange under the warm key.
+
 **Choreography**
 - Hero: watch three-quarter front, hands = real local time, seconds hand ticks once a second with a small spring settle.
 - Configurator: watch turns to face the picker, larger; horizontal drag turns it (`touch-action: pan-y`).

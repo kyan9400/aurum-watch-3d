@@ -28,9 +28,11 @@ function WatchCanvas({ tier, onReady, onLost }: Props) {
         gl.toneMappingExposure = 1.05;
       }}
     >
-      <ambientLight intensity={0.12} />
-      <directionalLight position={[3, 4, 5]} intensity={1.6} />
-      <directionalLight position={[-4, -1, 2]} intensity={0.45} color="#ffd9a8" />
+      <ambientLight intensity={0.08} />
+      <directionalLight position={[3, 4, 5]} intensity={1.7} color="#fff3e2" />
+      <directionalLight position={[-4, -1, 2]} intensity={0.35} color="#ffd9a8" />
+      {/* warm rim from behind-left: outlines the lugs, crown and strap edges against the dark */}
+      <directionalLight position={[-4, 3, -4]} intensity={2.4} color="#ffb766" />
       <Environment resolution={settings.envResolution} frames={1}>
         {/* a small photo studio, made of light panels (no HDRI download) */}
         <Lightformer form="rect" intensity={3.2} position={[0, 4, 2]} rotation-x={Math.PI / 2} scale={[8, 3, 1]} />
@@ -41,6 +43,9 @@ function WatchCanvas({ tier, onReady, onLost }: Props) {
         {/* two long thin strips about 35° up: crisp highlight lines along the polished bevels */}
         <Lightformer form="rect" intensity={4} position={[-3.2, 3.4, 3.2]} scale={[12, 0.25, 1]} target={[0, 0, 0]} />
         <Lightformer form="rect" intensity={4} position={[3.2, 3.4, 3.2]} scale={[12, 0.25, 1]} target={[0, 0, 0]} />
+        {/* the studio's warm amber softbox (left) and a cool steel kicker (right): gold reads warm and cool at once */}
+        <Lightformer form="rect" intensity={5} position={[-6, 0.5, -1]} scale={[1.6, 9, 1]} target={[0, 0, 0]} color="#ffae52" />
+        <Lightformer form="rect" intensity={2.2} position={[6, 1.5, -2]} scale={[1.2, 7, 1]} target={[0, 0, 0]} color="#a9c2ff" />
       </Environment>
       <WatchRig tier={tier} onReady={onReady} onLost={onLost} />
     </Canvas>

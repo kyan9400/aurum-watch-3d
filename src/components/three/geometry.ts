@@ -643,7 +643,8 @@ export function indexMatrices(): Matrix4[] {
   const out: Matrix4[] = [];
   const R = 0.645;
   for (let h = 0; h < 12; h++) {
-    if (h === 3) continue;
+    // 3 o'clock gives way to the date, 6 o'clock to the open heart
+    if (h === 3 || h === 6) continue;
     const a = (h / 12) * Math.PI * 2;
     const offsets = h === 0 ? [-0.028, 0.028] : [0];
     for (const off of offsets) {
@@ -721,11 +722,14 @@ export const GEARS: GearSpec[] = [
   { x: 0, y: 0, r: 0.3, teeth: 60, spokes: 5, speed: 0.06, z: 0 },
   { x: 0.33, y: 0.3, r: 0.16, teeth: 36, spokes: 4, speed: -0.2, z: 0.012 },
   { x: -0.38, y: 0.2, r: 0.2, teeth: 44, spokes: 5, speed: -0.14, z: 0.006 },
-  { x: -0.12, y: -0.46, r: 0.14, teeth: 30, spokes: 4, speed: 0.32, z: 0.012 },
+  { x: -0.44, y: -0.3, r: 0.14, teeth: 30, spokes: 4, speed: 0.32, z: 0.012 },
   { x: 0.42, y: -0.1, r: 0.11, teeth: 24, spokes: 3, speed: 0.52, z: 0.018 },
 ];
 
-export const BALANCE = { x: 0.3, y: -0.42, r: 0.17 };
+/** The balance sits under the open-heart aperture at 6 o'clock, so it beats in view from the front. */
+export const BALANCE = { x: 0, y: -0.37, r: 0.2 };
+/** Open-heart window in the dial (world units, dial space). */
+export const APERTURE = { x: 0, y: -0.37, r: 0.225 };
 
 /** Heights (movement-inner space) of the surfaces things sit on. */
 export const SURFACE = { plateTop: 0.01, plateBottom: -0.08, gearBase: 0.008, gearDepth: 0.022, bridgeZ: 0.05, bridgeTop: 0.083 };
@@ -773,10 +777,10 @@ export function bridgeGeometry(curveSegments: number) {
   train.quadraticCurveTo(-0.25, 0.4, -0.52, 0.08);
   train.closePath();
   const cock = new Shape();
-  cock.moveTo(0.72, -0.2);
-  cock.quadraticCurveTo(0.6, -0.36, 0.36, -0.36);
-  cock.absarc(0.3, -0.42, 0.07, 0.5, Math.PI * 1.6, false);
-  cock.quadraticCurveTo(0.55, -0.55, 0.74, -0.32);
+  cock.moveTo(0.72, -0.24);
+  cock.quadraticCurveTo(0.4, -0.27, 0.06, -0.335);
+  cock.absarc(BALANCE.x, BALANCE.y, 0.07, 0.52, Math.PI * 1.6, false);
+  cock.quadraticCurveTo(0.4, -0.46, 0.74, -0.34);
   cock.closePath();
   return new ExtrudeGeometry([train, cock], {
     depth: 0.025,

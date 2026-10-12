@@ -4,9 +4,11 @@
 
 import {
   AdditiveBlending,
+  BufferAttribute,
   BufferGeometry,
   CanvasTexture,
   Color,
+  CylinderGeometry,
   DoubleSide,
   Group,
   InstancedMesh,
@@ -17,6 +19,8 @@ import {
   MeshPhysicalMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
+  Points,
+  PointsMaterial,
   SphereGeometry,
   Sprite,
   SpriteMaterial,
@@ -31,7 +35,10 @@ import type { WatchConfig } from "@/lib/store";
 import * as G from "./geometry";
 import {
   anisotropyDialTexture,
+  beamTexture,
+  chapterRingTexture,
   crownEmblemTexture,
+  drawChapterRing,
   drawDial,
   drawRotor,
   drawStrap,
@@ -158,6 +165,23 @@ export class WatchModel {
   private glows: Sprite[] = [];
   private wasConfig = false;
 
+  // atmosphere: warm halo, giant engraved chapter ring, a light shaft with drifting dust
+  private halo!: Mesh;
+  private haloMat!: MeshBasicMaterial;
+  private chapter!: Mesh;
+  private chapterMat!: MeshBasicMaterial;
+  private chapterTex!: CanvasTexture;
+  private beam!: Group;
+  private beamMat!: MeshBasicMaterial;
+  private dust: Points | null = null;
+  private dustMat: PointsMaterial | null = null;
+  private dustPos: Float32Array | null = null;
+  private dustSpeed: Float32Array | null = null;
+  private chapterSpin = 0;
+  private haloWarm = new Color("#c98a3a");
+  private haloCool = new Color("#5d6f8f");
+  private haloSoft = new Color("#a8814a");
+
   // targets for the material cross-fade
   private caseColor = new Color();
   private trimColor = new Color();
@@ -280,12 +304,13 @@ export class WatchModel {
           roughness: this.dial.roughness,
           metalness: this.dial.metalness,
           anisotropyMap: aniso,
+          alphaTest: 0.5,
           // never exactly 0: crossing zero would recompile the shader on every dial change
           anisotropy: this.dial.finish === "sunburst" ? 0.8 : 0.001,
         }),
       );
     } else {
-      this.dialMat = mat(new MeshStandardMaterial({ map: this.dialTex, roughness: this.dial.roughness, metalness: this.dial.metalness }));
+      this.dialMat = mat(new MeshStandardMaterial({ map: this.dialTex, roughness: this.dial.roughness, metalness: this.dial.metalness, alphaTest: 0.5 }));
     }
     this.rehautColor.set(this.dial.base).multiplyScalar(0.8);
     this.rehautMat = mat(new MeshStandardMaterial({ color: this.rehautColor.clone(), roughness: 0.5, metalness: 0.2, side: DoubleSide }));
@@ -353,6 +378,15 @@ export class WatchModel {
     disc.position.z = 0.1;
     dialL.add(disc);
     dialL.add(new Mesh(geo(G.rehaut(radial)), this.rehautMat));
+    // open-heart aperture: a polished bezel ring and a short dark sleeve down towards the balance
+    const ap = G.APERTURE;
+    const apRing = new Mesh(geo(new TorusGeometry(ap.r + 0.004, 0.009, 8, Math.max(32, radial / 2))), this.trimMat);
+    apRing.position.set(ap.x, ap.y, 0.104);
+    const sleeveGeo = geo(new CylinderGeometry(ap.r, ap.r, 0.12, Math.max(32, radial / 2), 1, true));
+    sleeveGeo.rotateX(Math.PI / 2);
+    const sleeve = new Mesh(sleeveGeo, mat(new MeshStandardMaterial({ color: "#2b2620", metalness: 1, roughness: 0.3, side: DoubleSide })));
+    sleeve.position.set(ap.x, ap.y, 0.04);
+    dialL.add(apRing, sleeve);
     const idxM = G.indexMatrices();
     const indices = new InstancedMesh(geo(G.batonIndex()), this.trimMat, idxM.length);
     const lumes = new InstancedMesh(geo(G.indexLume()), lumeMat, idxM.length);
@@ -554,7 +588,60 @@ export class WatchModel {
         this.glows.push(sp);
       }
     }
+    this.buildAtmosphere(soft, geo, mat, tex);
     this.current = config;
+  }
+
+  private buildAtmosphere(
+    soft: CanvasTexture,
+    geo: <T extends BufferGeometry>(g: T) => T,
+    mat: <T extends Material>(m: T) => T,
+    tex: <T extends Texture>(t: T) => T,
+  ) {
+    const settings = this.settings;
+    const plane = geo(new PlaneGeometry(1, 1));
+    // warm studio halo behind the watch
+    this.haloMat = mat(new MeshBasicMaterial({ map: soft, color: this.haloWarm.clone(), transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.5 }));
+    this.halo = new Mesh(plane, this.haloMat);
+    this.halo.renderOrder = -3;
+    // giant engraved chapter ring, like a tower-clock dial seen in the dark
+    this.chapterTex = tex(chapterRingTexture(settings.textureSize >= 1024 ? 2048 : 1024));
+    this.chapterMat = mat(new MeshBasicMaterial({ map: this.chapterTex, color: "#D2AE6D", transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.2 }));
+    this.chapter = new Mesh(plane, this.chapterMat);
+    this.chapter.renderOrder = -2;
+    // a slanted light shaft from the upper right, with dust drifting in it (medium + high)
+    this.beam = new Group();
+    this.beamMat = mat(new MeshBasicMaterial({ map: tex(beamTexture(64, 256)), color: "#ffd9a0", transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.2 }));
+    const shaft = new Mesh(plane, this.beamMat);
+    shaft.scale.set(2.4, 9, 1);
+    shaft.renderOrder = -1;
+    this.beam.add(shaft);
+    const count = settings.glow ? 160 : settings.sway ? 80 : 0;
+    if (count) {
+      const pos = new Float32Array(count * 3);
+      const speed = new Float32Array(count);
+      let seed = 11;
+      const rand = () => {
+        seed = (seed * 16807) % 2147483647;
+        return seed / 2147483647;
+      };
+      for (let i = 0; i < count; i++) {
+        const v = rand();
+        pos[i * 3] = (rand() - 0.5) * (0.5 + 1.4 * v);
+        pos[i * 3 + 1] = 4.5 - v * 9;
+        pos[i * 3 + 2] = (rand() - 0.5) * 1.2;
+        speed[i] = 0.05 + rand() * 0.12;
+      }
+      const g = geo(new BufferGeometry());
+      g.setAttribute("position", new BufferAttribute(pos, 3));
+      this.dustMat = mat(new PointsMaterial({ map: soft, color: "#ffe3b8", size: 0.045, sizeAttenuation: true, transparent: true, depthWrite: false, blending: AdditiveBlending, opacity: 0.7 }));
+      this.dust = new Points(g, this.dustMat);
+      this.dust.frustumCulled = false;
+      this.dustPos = pos;
+      this.dustSpeed = speed;
+      this.beam.add(this.dust);
+    }
+    this.root.add(this.halo, this.chapter, this.beam);
   }
 
   private roughFor(kind: MetalKind, r: number) {
@@ -569,7 +656,9 @@ export class WatchModel {
     if (!isBracelet) {
       drawStrap(strap, this.strapCanvas.width, this.strapCanvas);
       this.strapTex.needsUpdate = true;
-      this.strapMat.roughness = strap.kind === "silk" ? 0.78 : strap.kind === "alligator" ? 0.42 : 0.6;
+      this.strapMat.roughness = strap.kind === "silk" ? 0.78 : strap.kind === "alligator" ? 0.42 : 0.5;
+      // calf leather reads orange under the warm key; a deeper tone keeps it cognac
+      this.strapMat.color.setScalar(strap.kind === "leather" ? 0.55 : 1);
       this.strapMat.bumpScale = strap.kind === "alligator" ? 1.4 : strap.kind === "silk" ? 0.4 : 0.6;
     }
   }
@@ -582,6 +671,9 @@ export class WatchModel {
     const fresh = drawRotor(rotorCanvas.width);
     rotorCanvas.getContext("2d")!.drawImage(fresh, 0, 0);
     this.rotorTex.needsUpdate = true;
+    const cc = this.chapterTex.image as HTMLCanvasElement;
+    drawChapterRing(cc.getContext("2d")!, cc.width);
+    this.chapterTex.needsUpdate = true;
   }
 
   /** One pass of light across the crystal (medium + high, full motion only). */
@@ -776,6 +868,54 @@ export class WatchModel {
     this.shadowMat.opacity = 0.5 * (1 - openAll);
     this.shadow.visible = this.shadowMat.opacity > 0.01;
 
+    /* atmosphere: each chapter gets its own light */
+    const alive = !inp.reduced && inp.inView && this.settings.sway;
+    const hero = (1 - ka) * (1 - kb);
+    const cfg = ka * (1 - kb);
+    const dBack = (7.6 + 2.6) / 7.6;
+    this.halo.position.set(x * dBack, y * dBack + 0.1 * s, -2.6);
+    const haloSize = (5.2 + 1.2 * kb) * s * dBack;
+    this.halo.scale.set(haloSize, haloSize, 1);
+    this.haloMat.color.copy(this.haloWarm).lerp(this.haloSoft, cfg).lerp(this.haloCool, kb);
+    this.haloMat.opacity = 0.5 * hero + 0.32 * cfg + 0.42 * kb;
+
+    const dRing = (7.6 + 2.4) / 7.6;
+    this.chapter.position.set(x * dRing, y * dRing, -2.4);
+    const ringSize = (4.3 * hero + 3.6 * cfg + 5.2 * kb) * s * dRing;
+    this.chapter.scale.set(ringSize, ringSize, 1);
+    if (alive) {
+      this.chapterSpin += dt * 0.02;
+      more = true;
+    }
+    this.chapter.rotation.set(-0.5 * hero - 0.15 * cfg + 0.25 * kb, 0.42 * hero - 0.2 * cfg - 0.3 * kb, this.chapterSpin + (inp.reduced ? 0 : this.e * 1.2));
+    this.chapterMat.opacity = 0.2 * hero + 0.1 * cfg + 0.26 * kb;
+
+    this.beamMat.opacity = 0.32 * hero + 0.1 * cfg;
+    this.beam.visible = this.beamMat.opacity > 0.01;
+    if (this.beam.visible) {
+      const dB = (7.6 + 1.3) / 7.6;
+      const bx = this.mobile ? 0.9 : 1.1;
+      // the shaft's axis leans to the upper right and passes through the watch
+      this.beam.position.set((x + bx * 0.74 * s) * dB, (y + 1.9 * s) * dB, -1.3);
+      this.beam.rotation.set(0, 0, -0.38);
+      this.beam.scale.setScalar(Math.max(0.8, s));
+      if (this.dust && this.dustPos && this.dustSpeed && this.dustMat) {
+        this.dustMat.opacity = Math.min(1, this.beamMat.opacity * 4);
+        if (alive) {
+          const p = this.dustPos;
+          const sp = this.dustSpeed;
+          const tt = inp.elapsed;
+          for (let i = 0; i < sp.length; i++) {
+            let yy = p[i * 3 + 1] - sp[i] * dt;
+            if (yy < -4.5) yy += 9;
+            p[i * 3 + 1] = yy;
+            p[i * 3] += Math.sin(tt * 0.6 + i) * 0.012 * dt;
+          }
+          (this.dust.geometry.getAttribute("position") as BufferAttribute).needsUpdate = true;
+        }
+      }
+    }
+
     /* strap swap: the halves slide out, change, and slide back */
     if (this.strapK < 1) {
       this.strapK = Math.min(1, this.strapK + dt / 0.7);
@@ -856,9 +996,10 @@ export class WatchModel {
     this.hour.rotation.z = -(((local / 3600000) % 12) / 12) * TAU;
 
     /* the movement runs while it is on show; the rotor makes half a turn during the caseback reveal */
-    if (!inp.reduced && kb > 0.02 && inp.inView) {
+    if (!inp.reduced && inp.inView && (kb > 0.02 || swayW > 0.001)) {
       for (const g of this.gears) g.rotation.z += (g.userData.speed as number) * dt * 2.2;
-      this.balance.rotation.z = Math.sin(inp.elapsed * TAU * 1.25) * 1.1;
+      // 28,800 vph is 4 Hz; shown at 2.5 Hz so the eye can follow the swing through the open heart
+      this.balance.rotation.z = Math.sin(inp.elapsed * TAU * 2.5) * 1.6;
       this.rotorSpin += dt * 0.25;
       more = true;
     }

@@ -2,6 +2,7 @@
 
 import { CanvasTexture, ClampToEdgeWrapping, NoColorSpace, RepeatWrapping, SRGBColorSpace } from "three";
 import type { DialOption, StrapOption } from "@/lib/options";
+import { APERTURE } from "./geometry";
 
 /** Small deterministic random so textures look the same on every visit. */
 function rng(seed: number) {
@@ -44,6 +45,7 @@ export function drawDial(dial: DialOption, size: number, canvas?: HTMLCanvasElem
   const R = size / 2;
   const fonts = fontFamilies();
   const rand = rng(7);
+  ctx.clearRect(0, 0, size, size);
   ctx.save();
   ctx.translate(R, R);
 
@@ -128,17 +130,30 @@ export function drawDial(dial: DialOption, size: number, canvas?: HTMLCanvasElem
   // brand
   ctx.textBaseline = "middle";
   ctx.font = `600 ${Math.round(size * 0.07)}px ${fonts.display}`;
-  spacedText(ctx, "AURUM", 0, -R * 0.4, size * 0.012);
+  spacedText(ctx, "AURUM", 0, -R * 0.44, size * 0.012);
   ctx.font = `500 ${Math.round(size * 0.019)}px ${fonts.sans}`;
   ctx.globalAlpha = 0.8;
-  spacedText(ctx, "HORLOGERIE  ·  1911", 0, -R * 0.28, size * 0.006);
+  spacedText(ctx, "HORLOGERIE  ·  1911", 0, -R * 0.32, size * 0.006);
   ctx.globalAlpha = 1;
-  ctx.font = `italic 500 ${Math.round(size * 0.05)}px ${fonts.display}`;
-  spacedText(ctx, "Meridian", 0, R * 0.36, size * 0.002);
-  ctx.font = `500 ${Math.round(size * 0.018)}px ${fonts.sans}`;
-  ctx.globalAlpha = 0.75;
-  spacedText(ctx, "AUTOMATIQUE  ·  72 H", 0, R * 0.47, size * 0.006);
-  ctx.globalAlpha = 1;
+  ctx.font = `italic 500 ${Math.round(size * 0.042)}px ${fonts.display}`;
+  spacedText(ctx, "Meridian", 0, -R * 0.2, size * 0.002);
+
+  // open-heart aperture at 6 o'clock: a bevelled shadow ring, then cut through (alphaTest drops it)
+  const ax = (APERTURE.x / 0.805) * R;
+  const ay = (-APERTURE.y / 0.805) * R;
+  const ar = (APERTURE.r / 0.805) * R;
+  const ring = ctx.createRadialGradient(ax, ay, ar, ax, ay, ar * 1.16);
+  ring.addColorStop(0, "rgba(0,0,0,0.55)");
+  ring.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = ring;
+  ctx.beginPath();
+  ctx.arc(ax, ay, ar * 1.16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.beginPath();
+  ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
 
   // date window at 3 o'clock
   const day = new Date().getDate();
@@ -458,6 +473,106 @@ export function sweepTexture(width: number) {
   g.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, width, 4);
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  t.wrapS = t.wrapT = ClampToEdgeWrapping;
+  return t;
+}
+
+/** Giant engraved chapter ring for the backdrop: rings, a rose-engine guilloché band, minute track and Roman hours.
+    White on transparent; tinted and faded by the material. */
+export function chapterRingTexture(size: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d")!;
+  drawChapterRing(ctx, size);
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  return t;
+}
+
+export function drawChapterRing(ctx: CanvasRenderingContext2D, size: number) {
+  const R = size / 2;
+  const px = size / 1024;
+  const fonts = fontFamilies();
+  ctx.clearRect(0, 0, size, size);
+  ctx.save();
+  ctx.translate(R, R);
+  ctx.strokeStyle = "#ffffff";
+  ctx.fillStyle = "#ffffff";
+  const circle = (r: number, w: number, a: number) => {
+    ctx.globalAlpha = a;
+    ctx.lineWidth = w * px;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * R, 0, Math.PI * 2);
+    ctx.stroke();
+  };
+  circle(0.985, 2.2, 0.9);
+  circle(0.955, 1, 0.6);
+  circle(0.79, 1, 0.5);
+  circle(0.6, 1.6, 0.7);
+  circle(0.36, 1, 0.45);
+  // minute track
+  for (let i = 0; i < 240; i++) {
+    const a = (i / 240) * Math.PI * 2;
+    const major = i % 20 === 0;
+    const mid = i % 4 === 0;
+    ctx.save();
+    ctx.rotate(a);
+    ctx.globalAlpha = major ? 0.95 : mid ? 0.6 : 0.3;
+    const len = major ? 0.06 : mid ? 0.03 : 0.015;
+    const w = (major ? 3 : 1.2) * px;
+    ctx.fillRect(-w / 2, -0.955 * R, w, len * R);
+    ctx.restore();
+  }
+  // Roman hours
+  const romans = ["XII", "I", "II", "III", "IIII", "V", "VI", "VII", "VIII", "IX", "X", "XI"];
+  ctx.font = `500 ${Math.round(size * 0.05)}px ${fonts.display}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.globalAlpha = 0.75;
+  romans.forEach((r, i) => {
+    ctx.save();
+    ctx.rotate((i / 12) * Math.PI * 2);
+    ctx.fillText(r, 0, -0.85 * R);
+    ctx.restore();
+  });
+  // rose-engine guilloché band between 0.38 and 0.58
+  ctx.globalAlpha = 0.16;
+  ctx.lineWidth = 1 * px;
+  const n = 96;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * 0.48 * R, Math.sin(a) * 0.48 * R, 0.1 * R, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/** A soft studio light shaft: bright at the top, fading down, gaussian across. */
+export function beamTexture(w: number, h: number) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    const v = y / (h - 1);
+    const along = Math.pow(1 - v, 1.6) * (0.25 + 0.75 * Math.min(1, v * 6));
+    // the shaft widens as it falls
+    const spread = 0.16 + 0.26 * v;
+    for (let x = 0; x < w; x++) {
+      const u = (x / (w - 1)) * 2 - 1;
+      const across = Math.exp(-(u * u) / (2 * spread * spread));
+      const a = Math.round(255 * along * across);
+      const i = (y * w + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+      img.data[i + 3] = a;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
   const t = new CanvasTexture(c);
   t.colorSpace = SRGBColorSpace;
   t.wrapS = t.wrapT = ClampToEdgeWrapping;
