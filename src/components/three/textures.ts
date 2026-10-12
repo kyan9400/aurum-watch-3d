@@ -1,6 +1,6 @@
 /* Canvas-drawn textures: dial faces, strap leathers, the rotor's Geneva stripes. Nothing is downloaded. */
 
-import { CanvasTexture, RepeatWrapping, SRGBColorSpace } from "three";
+import { CanvasTexture, ClampToEdgeWrapping, NoColorSpace, RepeatWrapping, SRGBColorSpace } from "three";
 import type { DialOption, StrapOption } from "@/lib/options";
 
 /** Small deterministic random so textures look the same on every visit. */
@@ -36,7 +36,8 @@ function spacedText(ctx: CanvasRenderingContext2D, text: string, x: number, y: n
   });
 }
 
-export function drawDial(dial: DialOption, size: number, canvas?: HTMLCanvasElement) {
+/** rays: strength of the painted sunburst rays (lower when the anisotropic sheen does the work). */
+export function drawDial(dial: DialOption, size: number, canvas?: HTMLCanvasElement, rays = 1) {
   const c = canvas ?? document.createElement("canvas");
   c.width = c.height = size;
   const ctx = c.getContext("2d")!;
@@ -56,7 +57,7 @@ export function drawDial(dial: DialOption, size: number, canvas?: HTMLCanvasElem
       const a1 = ((i + 1) / n) * Math.PI * 2;
       // brightness follows a slow wave so the rays catch "light" on two sides
       const wave = 0.5 + 0.5 * Math.cos(a0 * 2 - 0.6);
-      ctx.globalAlpha = 0.18 + wave * 0.5 + rand() * 0.08;
+      ctx.globalAlpha = (0.18 + wave * 0.5 + rand() * 0.08) * rays;
       ctx.fillStyle = dial.accent;
       ctx.beginPath();
       ctx.moveTo(0, 0);
@@ -286,4 +287,179 @@ export function drawRotor(size: number) {
   ctx.font = `500 ${Math.round(size * 0.028)}px ${fonts.sans}`;
   spacedText(ctx, "CALIBRE AU-28 · 31 JEWELS", size / 2, size * 0.38, size * 0.005);
   return c;
+}
+
+/* ---------- data textures (linear, not colour) ---------- */
+
+function dataTexture(c: HTMLCanvasElement, repeat = false) {
+  const t = new CanvasTexture(c);
+  t.colorSpace = NoColorSpace;
+  t.wrapS = t.wrapT = repeat ? RepeatWrapping : ClampToEdgeWrapping;
+  return t;
+}
+
+/** Sunburst brushing direction for a planar-UV disc: RG = tangent direction (-sin, cos) in 0..1, B = strength. */
+export function anisotropyDialTexture(size: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  for (let py = 0; py < size; py++) {
+    // canvas rows run top-down, UV v runs bottom-up
+    const y = 1 - (py + 0.5) / size - 0.5;
+    for (let px = 0; px < size; px++) {
+      const x = (px + 0.5) / size - 0.5;
+      const a = Math.atan2(y, x);
+      const k = (py * size + px) * 4;
+      d[k] = Math.round((-Math.sin(a) * 0.5 + 0.5) * 255);
+      d[k + 1] = Math.round((Math.cos(a) * 0.5 + 0.5) * 255);
+      d[k + 2] = 255;
+      d[k + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return dataTexture(c);
+}
+
+/** Perlage: overlapping circular grains on a tileable grid (used as map + roughnessMap). */
+export function perlageTexture(size: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#c4c8ce";
+  ctx.fillRect(0, 0, size, size);
+  const n = 14;
+  const step = size / n;
+  const r = step * 0.92;
+  const conic = typeof ctx.createConicGradient === "function";
+  for (let row = -1; row <= n + 1; row++) {
+    for (let col = -1; col <= n + 1; col++) {
+      const x = col * step + (row % 2 ? step / 2 : 0);
+      const y = row * step;
+      let g: CanvasGradient;
+      if (conic) {
+        g = ctx.createConicGradient(0.6 + ((row * 7 + col * 3) % 5) * 0.08, x, y);
+        g.addColorStop(0, "#f1f3f6");
+        g.addColorStop(0.25, "#9ba1a9");
+        g.addColorStop(0.5, "#eceff2");
+        g.addColorStop(0.75, "#8f959d");
+        g.addColorStop(1, "#f1f3f6");
+      } else {
+        g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
+        g.addColorStop(0, "#f1f3f6");
+        g.addColorStop(1, "#8f959d");
+      }
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(60,64,70,0.35)";
+      ctx.lineWidth = Math.max(1, size / 512);
+      ctx.stroke();
+    }
+  }
+  return dataTexture(c, true);
+}
+
+/** Caseback engraving for a ring with planar UVs. R = height (bump, text recessed), G = roughness (text frosted). */
+export function engravingTexture(size: number, innerRatio: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d")!;
+  const fonts = fontFamilies();
+  const R = size / 2;
+  ctx.fillStyle = "rgb(255,150,0)";
+  ctx.fillRect(0, 0, size, size);
+  ctx.translate(R, R);
+  // two fine rules framing the text band
+  ctx.strokeStyle = "rgb(90,255,0)";
+  ctx.lineWidth = Math.max(1, size / 400);
+  for (const k of [innerRatio + 0.02, 0.975]) {
+    ctx.beginPath();
+    ctx.arc(0, 0, R * k, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const text = "AURUM HORLOGERIE · MERIDIAN 39 · SAPHIR · 50 M · Nº 0147 / 340 · SIGNÉ À LA MAIN · ";
+  const radius = R * (innerRatio + 0.975) * 0.5;
+  ctx.font = `600 ${Math.round(R * 0.075)}px ${fonts.sans}`;
+  ctx.fillStyle = "rgb(60,255,0)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const chars = [...text];
+  const widths = chars.map((ch) => ctx.measureText(ch).width);
+  const total = widths.reduce((a, b) => a + b, 0);
+  // spread the line evenly around the full circle
+  const scale = (Math.PI * 2 * radius) / total;
+  let a = -Math.PI / 2;
+  chars.forEach((ch, i) => {
+    const w = widths[i] * scale;
+    const mid = a + w / 2 / radius;
+    ctx.save();
+    ctx.rotate(mid + Math.PI / 2);
+    ctx.fillText(ch, 0, -radius);
+    ctx.restore();
+    a += w / radius;
+  });
+  return dataTexture(c);
+}
+
+/** Crown emblem: a raised "A" (R channel = height). */
+export function crownEmblemTexture(size: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d")!;
+  const fonts = fontFamilies();
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `600 ${Math.round(size * 0.62)}px ${fonts.display}`;
+  ctx.fillText("A", size / 2, size * 0.54);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = size * 0.03;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size * 0.44, 0, Math.PI * 2);
+  ctx.stroke();
+  return dataTexture(c);
+}
+
+/** Soft radial falloff: the backdrop shadow and the glow sprites share it. */
+export function radialTexture(size: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.35, "rgba(255,255,255,0.55)");
+  g.addColorStop(0.7, "rgba(255,255,255,0.12)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  return t;
+}
+
+/** A narrow bright band for the light sweep; moved by texture offset. */
+export function sweepTexture(width: number) {
+  const c = document.createElement("canvas");
+  c.width = width;
+  c.height = 4;
+  const ctx = c.getContext("2d")!;
+  const g = ctx.createLinearGradient(0, 0, width, 0);
+  g.addColorStop(0, "rgba(255,255,255,0)");
+  g.addColorStop(0.42, "rgba(255,255,255,0)");
+  g.addColorStop(0.49, "rgba(255,246,228,0.85)");
+  g.addColorStop(0.5, "rgba(255,255,255,1)");
+  g.addColorStop(0.53, "rgba(255,246,228,0.55)");
+  g.addColorStop(0.62, "rgba(255,255,255,0)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, width, 4);
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  t.wrapS = t.wrapT = ClampToEdgeWrapping;
+  return t;
 }

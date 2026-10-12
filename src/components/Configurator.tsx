@@ -79,7 +79,7 @@ export default function Configurator() {
           <span className="text-small text-stone hidden sm:inline">or drag the watch to turn it</span>
         </div>
         <a href="#reserve" className="btn btn-gold">
-          Reserve this one
+          <span className="btn-label">Reserve this one</span>
         </a>
       </div>
     </div>

@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+import { ACESFilmicToneMapping } from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer } from "@react-three/drei";
 import { TIERS, type Tier } from "@/lib/quality";
-import { readStage, type StagePhases } from "@/lib/stage";
+import { getStage, subscribeStage, type StagePhases } from "@/lib/stage";
 import { getConfig, onYawNudge, subscribeConfig } from "@/lib/store";
 import { getMotion, subscribeMotion } from "@/lib/motion";
 import { WatchModel } from "./watchModel";
 
 type Props = { tier: Tier; onReady: () => void; onLost: () => void };
 
-export default function WatchCanvas({ tier, onReady, onLost }: Props) {
+function WatchCanvas({ tier, onReady, onLost }: Props) {
   const settings = TIERS[tier];
   return (
     <Canvas
@@ -21,8 +22,13 @@ export default function WatchCanvas({ tier, onReady, onLost }: Props) {
       camera={{ fov: 30, position: [0, 0, 7.6], near: 0.1, far: 40 }}
       style={{ touchAction: "pan-y" }}
       aria-hidden="true"
+      onCreated={({ gl }) => {
+        // ACES keeps the gold warm (AgX greys it out)
+        gl.toneMapping = ACESFilmicToneMapping;
+        gl.toneMappingExposure = 1.05;
+      }}
     >
-      <ambientLight intensity={0.25} />
+      <ambientLight intensity={0.12} />
       <directionalLight position={[3, 4, 5]} intensity={1.6} />
       <directionalLight position={[-4, -1, 2]} intensity={0.45} color="#ffd9a8" />
       <Environment resolution={settings.envResolution} frames={1}>
@@ -32,11 +38,17 @@ export default function WatchCanvas({ tier, onReady, onLost }: Props) {
         <Lightformer form="rect" intensity={1.4} position={[5, 0, 0]} rotation-y={-Math.PI / 2} scale={[6, 0.8, 1]} />
         <Lightformer form="ring" intensity={1.2} position={[2, 2, 5]} scale={2.5} color="#ffe7c2" />
         <Lightformer form="rect" intensity={0.6} position={[0, -4, 1]} rotation-x={-Math.PI / 2} scale={[8, 4, 1]} color="#5a4630" />
+        {/* two long thin strips about 35° up: crisp highlight lines along the polished bevels */}
+        <Lightformer form="rect" intensity={4} position={[-3.2, 3.4, 3.2]} scale={[12, 0.25, 1]} target={[0, 0, 0]} />
+        <Lightformer form="rect" intensity={4} position={[3.2, 3.4, 3.2]} scale={[12, 0.25, 1]} target={[0, 0, 0]} />
       </Environment>
       <WatchRig tier={tier} onReady={onReady} onLost={onLost} />
     </Canvas>
   );
 }
+
+// memo: the stage re-renders on every phase change; the scene (and the env "lights on" ramp) should not
+export default memo(WatchCanvas);
 
 /* Builds the watch in slices (yielding between them), then hands it to the live rig. */
 function WatchRig({ tier, onReady, onLost }: Props) {
@@ -76,6 +88,9 @@ function LiveWatch({ model, tier, onReady, onLost }: Props & { model: WatchModel
     target: { toConfig: 0, toExplode: 0, explode: 0 } as StagePhases,
     inView: true,
     reduced: true,
+    // "lights on" intro: environment ramps up as the poster leaves
+    rampStart: -1,
+    ramping: false,
     // adaptive resolution
     avg: 16.7,
     dpr: 1,
@@ -90,14 +105,18 @@ function LiveWatch({ model, tier, onReady, onLost }: Props & { model: WatchModel
     const st = live.current;
     st.reduced = getMotion().reduced;
     st.dpr = Math.min(window.devicePixelRatio || 1, settings.dprCap);
-    readStage(st.target);
-
-    const onScroll = () => {
-      readStage(st.target);
-      if (st.inView) invalidate();
+    const copy = (s: StagePhases) => {
+      st.target.toConfig = s.toConfig;
+      st.target.toExplode = s.toExplode;
+      st.target.explode = s.explode;
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    copy(getStage());
+
+    // one shared scroll reader for the whole page
+    const unStage = subscribeStage((s) => {
+      copy(s);
+      if (st.inView) invalidate();
+    });
 
     const unConfig = subscribeConfig(() => {
       model.applyConfig(getConfig(), st.reduced);
@@ -177,8 +196,7 @@ function LiveWatch({ model, tier, onReady, onLost }: Props & { model: WatchModel
     el.addEventListener("webglcontextlost", lost);
 
     return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
+      unStage();
       unConfig();
       unMotion();
       unYaw();
@@ -210,8 +228,22 @@ function LiveWatch({ model, tier, onReady, onLost }: Props & { model: WatchModel
       .catch(() => undefined)
       .then(() => {
         if (cancelled) return;
+        const st = live.current;
+        if (st.reduced) scene.environmentIntensity = 1;
+        else {
+          scene.environmentIntensity = 0.15;
+          st.ramping = true;
+          st.rampStart = -1;
+        }
         invalidate();
-        requestAnimationFrame(() => requestAnimationFrame(() => !cancelled && onReady()));
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            if (cancelled) return;
+            onReady();
+            model.startSweep(live.current.reduced);
+            invalidate();
+          }),
+        );
       });
     return () => {
       cancelled = true;
@@ -220,7 +252,7 @@ function LiveWatch({ model, tier, onReady, onLost }: Props & { model: WatchModel
 
   useFrame((state, delta) => {
     const st = live.current;
-    const more = model.update({
+    let more = model.update({
       delta,
       elapsed: state.clock.elapsedTime,
       target: st.target,
@@ -255,6 +287,20 @@ function LiveWatch({ model, tier, onReady, onLost }: Props & { model: WatchModel
             st.calmSince = 0;
           }
         } else st.calmSince = 0;
+      }
+    }
+
+    // lights on: 0.15 -> 1 over 1.4 s, ease-out
+    if (st.ramping) {
+      if (st.reduced) {
+        state.scene.environmentIntensity = 1;
+        st.ramping = false;
+      } else {
+        if (st.rampStart < 0) st.rampStart = state.clock.elapsedTime;
+        const k = Math.min(1, (state.clock.elapsedTime - st.rampStart) / 1.4);
+        state.scene.environmentIntensity = 0.15 + 0.85 * (1 - Math.pow(1 - k, 3));
+        if (k < 1) more = true;
+        else st.ramping = false;
       }
     }
 

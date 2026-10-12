@@ -3,25 +3,45 @@
    so nothing is allocated inside update(). */
 
 import {
+  AdditiveBlending,
+  BufferGeometry,
   CanvasTexture,
   Color,
   DoubleSide,
   Group,
   InstancedMesh,
   Material,
+  Matrix4,
   Mesh,
+  MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
-  BufferGeometry,
+  PlaneGeometry,
   SphereGeometry,
+  Sprite,
+  SpriteMaterial,
+  Texture,
+  TorusGeometry,
 } from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { TierSettings } from "@/lib/quality";
-import type { StagePhases } from "@/lib/stage";
+import { activeLayer, ASSEMBLE_START, LAYER_COUNT, LAYER_SPAN, LAYER_STEP, REVEAL_START, type StagePhases } from "@/lib/stage";
 import { findCase, findDial, findStrap, type CaseOption, type DialOption, type StrapOption } from "@/lib/options";
 import type { WatchConfig } from "@/lib/store";
 import * as G from "./geometry";
-import { drawDial, drawRotor, drawStrap, makeTexture, strapTexture } from "./textures";
+import {
+  anisotropyDialTexture,
+  crownEmblemTexture,
+  drawDial,
+  drawRotor,
+  drawStrap,
+  engravingTexture,
+  makeTexture,
+  perlageTexture,
+  radialTexture,
+  strapTexture,
+  sweepTexture,
+} from "./textures";
 
 export type FrameInput = {
   delta: number;
@@ -35,6 +55,8 @@ export type FrameInput = {
 };
 
 type Pose = { x: number; y: number; s: number; rx: number; ry: number; rz: number; spread: number };
+type Metal = MeshStandardMaterial | MeshPhysicalMaterial;
+type MetalKind = "polished" | "brushed";
 
 const TAU = Math.PI * 2;
 
@@ -43,14 +65,50 @@ const yieldToMain = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 const damp = (cur: number, to: number, lambda: number, dt: number) => cur + (to - cur) * (1 - Math.exp(-lambda * dt));
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+/** Ease-out with overshoot: s = 1.04 peaks about 4% past the target. */
+const easeOutBack = (t: number, s: number) => {
+  const u = t - 1;
+  return 1 + (s + 1) * u * u * u + s * u * u;
+};
 
-/** Exploded-view offsets along the watch axis, in "spread" units. */
-const LAYER_OFFSETS = { crystal: 3.0, hands: 2.1, dial: 1.2, case: 0, movement: -1.25, caseback: -2.35 };
+/** Exploded-view offsets along the watch axis, in "spread" units.
+    Layer order: crystal, hands, dial, case, movement, caseback. */
+const LAYER_OFFSETS = [3.0, 2.1, 1.2, 0, -1.25, -2.35];
+/** Rough centre height of each layer (for the axis ticks). */
+const LAYER_CENTRES = [0.35, 0.16, 0.1, 0, -0.2, -0.3];
+
+/** Choreography of the movement section, written into a preallocated object (no allocations). */
+export type Timeline = { layer: Float32Array; seat: Float32Array; open: number; turn: number; turnRaw: number };
+
+export function explodeTimeline(e: number, reduced: boolean, out: Timeline) {
+  let open = 0;
+  for (let i = 0; i < LAYER_COUNT; i++) {
+    // 0.00-0.62: staggered opening, crystal first
+    const w = clamp01((e - i * LAYER_STEP) / LAYER_SPAN);
+    const o = reduced ? smooth(w) : w <= 0 ? 0 : easeOutBack(w, 1.04);
+    // 0.82-1.00: closing in reverse order, caseback first
+    const k = LAYER_COUNT - 1 - i;
+    const cw = clamp01((e - (ASSEMBLE_START + k * 0.024)) / 0.06);
+    out.layer[i] = o * (1 - smooth(cw));
+    // a 2% "seat" as each layer lands
+    out.seat[i] = reduced ? 0 : Math.sin(Math.PI * cw) * 0.02;
+    open = Math.max(open, Math.min(1, out.layer[i]));
+  }
+  out.open = open;
+  // 0.62-0.82: turn to the caseback; ease back to a three-quarter view while it closes
+  const turn = smooth(clamp01((e - REVEAL_START) / (ASSEMBLE_START - REVEAL_START)));
+  out.turnRaw = turn;
+  out.turn = turn * (1 - 0.25 * smooth(clamp01((e - ASSEMBLE_START) / (1 - ASSEMBLE_START))));
+  return out;
+}
 
 export class WatchModel {
+  /** unposed container: the backdrop shadow lives here, the posed watch in `rig` */
   readonly root = new Group();
+  private rig = new Group();
   private inner = new Group();
-  private layers!: Record<keyof typeof LAYER_OFFSETS, Group>;
+  private layerList: Group[] = [];
   private strapTop = new Group();
   private strapBottom = new Group();
   private hour!: Mesh;
@@ -59,15 +117,18 @@ export class WatchModel {
   private gears: Mesh[] = [];
   private balance!: Mesh;
   private rotor!: Mesh;
+  private rotorSpin = 0.6;
 
   private geos: BufferGeometry[] = [];
   private mats: Material[] = [];
-  private textures: CanvasTexture[] = [];
+  private textures: Texture[] = [];
 
-  private caseMat!: MeshStandardMaterial | MeshPhysicalMaterial;
-  private braceletOuterMat!: MeshStandardMaterial;
+  // metals: polished + brushed (one material on low), all following the case option
+  private metals: { m: Metal; kind: MetalKind }[] = [];
+  private polishedMat!: Metal;
+  private brushedMat!: Metal;
   private trimMat!: MeshStandardMaterial;
-  private dialMat!: MeshStandardMaterial;
+  private dialMat!: MeshStandardMaterial | MeshPhysicalMaterial;
   private rehautMat!: MeshStandardMaterial;
   private strapMat!: MeshStandardMaterial;
   private leather: Mesh[] = [];
@@ -78,6 +139,24 @@ export class WatchModel {
   private strapCanvas!: HTMLCanvasElement;
   private strapTex!: CanvasTexture;
   private rotorTex!: CanvasTexture;
+
+  // exploded view extras
+  private axis!: Mesh;
+  private ticks!: InstancedMesh;
+  private axisMat!: MeshBasicMaterial;
+  private tickM = new Matrix4();
+  private lift = new Float32Array(LAYER_COUNT);
+  private tl: Timeline = { layer: new Float32Array(LAYER_COUNT), seat: new Float32Array(LAYER_COUNT), open: 0, turn: 0, turnRaw: 0 };
+
+  // backdrop shadow, light sweep, glow sprites
+  private shadow!: Mesh;
+  private shadowMat!: MeshBasicMaterial;
+  private sweep: Mesh | null = null;
+  private sweepMat: MeshBasicMaterial | null = null;
+  private sweepTex: CanvasTexture | null = null;
+  private sweepT = -1;
+  private glows: Sprite[] = [];
+  private wasConfig = false;
 
   // targets for the material cross-fade
   private caseColor = new Color();
@@ -108,6 +187,7 @@ export class WatchModel {
   private poseA: Pose = { x: 0, y: 0, s: 1, rx: 0, ry: 0, rz: 0, spread: 0 };
   private poseB: Pose = { x: 0, y: 0, s: 1, rx: 0, ry: 0, rz: 0, spread: 0 };
   private poseC: Pose = { x: 0, y: 0, s: 1, rx: 0, ry: 0, rz: 0, spread: 0 };
+  private mobile = false;
 
   /** Build the watch in a few slices, yielding to the main thread between them,
       so a slow phone never sees one long blocking task. */
@@ -128,22 +208,28 @@ export class WatchModel {
     this.settings = settings;
   }
 
+  private rays() {
+    // with the anisotropic sheen on, the painted rays only need half the strength
+    return this.settings.anisotropy ? 0.5 : 1;
+  }
+
   private *build(config: WatchConfig, anisotropy: number): Generator<void, void, void> {
     const settings = this.settings;
-    const seg = settings.curveSegments >= 10 ? 128 : settings.curveSegments >= 6 ? 96 : 64;
+    const radial = settings.radial;
     const cs = settings.curveSegments;
     const physical = settings.physicalCrystal;
     const c = findCase(config.case);
     this.dial = findDial(config.dial);
     this.strap = findStrap(config.strap);
 
-    this.root.add(this.inner);
-    const mk = () => {
+    this.root.add(this.rig);
+    this.rig.add(this.inner);
+    for (let i = 0; i < LAYER_COUNT; i++) {
       const g = new Group();
       this.inner.add(g);
-      return g;
-    };
-    this.layers = { crystal: mk(), hands: mk(), dial: mk(), case: mk(), movement: mk(), caseback: mk() };
+      this.layerList.push(g);
+    }
+    const [crystalL, handsL, dialL, caseL, mv, back] = this.layerList;
     this.inner.add(this.strapTop, this.strapBottom);
 
     const geo = <T extends BufferGeometry>(g: T) => {
@@ -154,81 +240,145 @@ export class WatchModel {
       this.mats.push(m);
       return m;
     };
+    const tex = <T extends Texture>(t: T) => {
+      this.textures.push(t);
+      return t;
+    };
 
-    /* materials */
-    this.caseMat = mat(
-      physical
-        ? new MeshPhysicalMaterial({ color: c.color, metalness: c.metalness, roughness: c.roughness, clearcoat: c.clearcoat, clearcoatRoughness: 0.08 })
-        : new MeshStandardMaterial({ color: c.color, metalness: c.metalness, roughness: c.roughness }),
-    );
-    this.braceletOuterMat = mat(new MeshStandardMaterial({ color: c.color, metalness: c.metalness, roughness: Math.min(1, c.roughness + 0.18) }));
-    this.trimMat = mat(new MeshStandardMaterial({ color: c.trim, metalness: 1, roughness: 0.12 }));
+    /* metals */
     this.caseColor.set(c.color);
     this.trimColor.set(c.trim);
     this.caseRough = c.roughness;
     this.caseMetal = c.metalness;
     this.caseCoat = c.clearcoat;
+    const metal = (kind: MetalKind, extra: Partial<MeshPhysicalMaterial> = {}) => {
+      const rough = this.roughFor(kind, c.roughness);
+      const m = settings.anisotropy
+        ? new MeshPhysicalMaterial({ color: c.color, metalness: c.metalness, roughness: rough, clearcoat: c.clearcoat, clearcoatRoughness: 0.08 })
+        : new MeshStandardMaterial({ color: c.color, metalness: c.metalness, roughness: rough });
+      Object.assign(m, extra);
+      mat(m);
+      this.metals.push({ m, kind });
+      return m;
+    };
+    this.polishedMat = metal("polished");
+    // brushed: a rougher twin (medium + high); on high it gets anisotropic brushing from the UVs
+    this.brushedMat = settings.perlageSize > 0 ? metal("brushed", settings.anisotropy ? { anisotropy: 0.75, anisotropyRotation: 0 } : {}) : this.polishedMat;
+    const metals = [this.polishedMat, this.brushedMat];
+    this.trimMat = mat(new MeshStandardMaterial({ color: c.trim, metalness: 1, roughness: 0.12 }));
+    const lumeMat = mat(new MeshStandardMaterial({ color: "#E9EFD9", emissive: "#9fd7b0", emissiveIntensity: 0.12, roughness: 0.55, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
 
-    this.dialCanvas = drawDial(this.dial, settings.textureSize);
-    this.dialTex = makeTexture(this.dialCanvas, anisotropy);
-    this.textures.push(this.dialTex);
-    this.dialMat = mat(new MeshStandardMaterial({ map: this.dialTex, roughness: this.dial.roughness, metalness: this.dial.metalness }));
+    /* dial */
+    this.dialCanvas = drawDial(this.dial, settings.textureSize, undefined, this.rays());
+    this.dialTex = tex(makeTexture(this.dialCanvas, anisotropy));
+    let aniso: Texture | null = null;
+    if (settings.anisotropy) {
+      aniso = tex(anisotropyDialTexture(512));
+      this.dialMat = mat(
+        new MeshPhysicalMaterial({
+          map: this.dialTex,
+          roughness: this.dial.roughness,
+          metalness: this.dial.metalness,
+          anisotropyMap: aniso,
+          // never exactly 0: crossing zero would recompile the shader on every dial change
+          anisotropy: this.dial.finish === "sunburst" ? 0.8 : 0.001,
+        }),
+      );
+    } else {
+      this.dialMat = mat(new MeshStandardMaterial({ map: this.dialTex, roughness: this.dial.roughness, metalness: this.dial.metalness }));
+    }
     this.rehautColor.set(this.dial.base).multiplyScalar(0.8);
     this.rehautMat = mat(new MeshStandardMaterial({ color: this.rehautColor.clone(), roughness: 0.5, metalness: 0.2, side: DoubleSide }));
 
     const crystalMat = mat(
       physical
-        ? new MeshPhysicalMaterial({ color: "#ffffff", metalness: 0, roughness: 0.02, transparent: true, opacity: 0.16, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.2, depthWrite: false })
+        ? new MeshPhysicalMaterial({
+            color: "#ffffff",
+            metalness: 0,
+            roughness: 0.02,
+            transparent: true,
+            opacity: 0.14,
+            clearcoat: 1,
+            clearcoatRoughness: 0.02,
+            envMapIntensity: 2.2,
+            specularIntensity: 1,
+            depthWrite: false,
+            ...(settings.iridescence ? { iridescence: 0.35, iridescenceIOR: 1.3, iridescenceThicknessRange: [180, 360] as [number, number] } : {}),
+          })
         : new MeshStandardMaterial({ color: "#ffffff", metalness: 0.4, roughness: 0.04, transparent: true, opacity: 0.12, envMapIntensity: 2, depthWrite: false }),
     );
 
     this.strapCanvas = drawStrap(this.strap, settings.textureSize >= 1024 ? 256 : 128);
-    this.strapTex = strapTexture(this.strapCanvas, anisotropy);
-    this.textures.push(this.strapTex);
+    this.strapTex = tex(strapTexture(this.strapCanvas, anisotropy));
     this.strapMat = mat(new MeshStandardMaterial({ map: this.strapTex, bumpMap: this.strapTex, bumpScale: 0.6, roughness: 0.62, metalness: 0 }));
+    const liningMat = mat(new MeshStandardMaterial({ color: "#C7A27A", roughness: 0.8, metalness: 0 }));
 
-    const plateMat = mat(new MeshStandardMaterial({ color: "#B7BBC2", metalness: 1, roughness: 0.38 }));
+    /* movement materials */
+    const perl = settings.perlageSize ? tex(perlageTexture(settings.perlageSize)) : null;
+    if (perl) perl.repeat.set(2.5, 2.5);
+    const plateMat = mat(
+      perl
+        ? new MeshStandardMaterial({ color: "#a9aeb5", metalness: 1, roughness: 0.55, map: perl, roughnessMap: perl })
+        : new MeshStandardMaterial({ color: "#B7BBC2", metalness: 1, roughness: 0.38 }),
+    );
     const gearMat = mat(new MeshStandardMaterial({ color: "#D8A64F", metalness: 1, roughness: 0.26 }));
-    const bridgeMat = mat(new MeshStandardMaterial({ color: "#D3D6DB", metalness: 1, roughness: 0.2 }));
+    const bridgeCapMat = mat(new MeshStandardMaterial({ color: "#C9CDD3", metalness: 1, roughness: 0.32 }));
+    const anglageMat = mat(new MeshStandardMaterial({ color: "#EEF0F3", metalness: 1, roughness: 0.08 }));
+    const bluedMat = mat(new MeshStandardMaterial({ color: "#2B4C9B", metalness: 1, roughness: 0.25 }));
     const jewelMat = mat(
       physical
         ? new MeshPhysicalMaterial({ color: "#A3192E", metalness: 0, roughness: 0.08, clearcoat: 1, emissive: "#3a0610", emissiveIntensity: 0.6 })
         : new MeshStandardMaterial({ color: "#A3192E", metalness: 0.1, roughness: 0.15, emissive: "#3a0610", emissiveIntensity: 0.6 }),
     );
-    this.rotorTex = makeTexture(drawRotor(settings.textureSize / 2), anisotropy);
+    this.rotorTex = tex(makeTexture(drawRotor(settings.textureSize / 2), anisotropy));
     this.rotorTex.repeat.set(1 / 1.48, 1 / 1.48);
     this.rotorTex.offset.set(0.5, 0.5);
-    this.textures.push(this.rotorTex);
     const rotorMat = mat(new MeshStandardMaterial({ map: this.rotorTex, metalness: 1, roughness: 0.3 }));
 
     yield;
 
-    /* case */
-    const caseL = this.layers.case;
-    caseL.add(new Mesh(geo(G.caseMiddle(seg)), this.caseMat));
-    caseL.add(new Mesh(geo(G.bezel(seg)), this.caseMat));
-    caseL.add(new Mesh(geo(G.lugs(cs)), this.caseMat));
-    caseL.add(new Mesh(geo(G.crown()), this.caseMat));
+    /* case: brushed flank, polished chamfers and bezel */
+    caseL.add(new Mesh(geo(G.caseMiddle(radial)), metals));
+    caseL.add(new Mesh(geo(G.bezel(radial)), this.polishedMat));
+    caseL.add(new Mesh(geo(G.lugs(settings.loftRing, settings.loftSamples)), metals));
+    caseL.add(new Mesh(geo(G.crown(radial)), this.polishedMat));
+    const emblemTex = tex(crownEmblemTexture(128));
+    const emblemMat = metal("polished", { bumpMap: emblemTex, bumpScale: 2, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    caseL.add(new Mesh(geo(G.crownEmblem()), emblemMat));
+    const spacerMat = mat(new MeshStandardMaterial({ color: "#2a2620", roughness: 0.6, metalness: 0.4 }));
+    caseL.add(new Mesh(geo(G.caseSpacer(radial)), spacerMat));
 
     /* dial */
-    const dialL = this.layers.dial;
-    const disc = new Mesh(geo(G.dialDisc(seg)), this.dialMat);
+    const disc = new Mesh(geo(G.dialDisc(radial)), this.dialMat);
     disc.position.z = 0.1;
     dialL.add(disc);
-    dialL.add(new Mesh(geo(G.rehaut(seg)), this.rehautMat));
+    dialL.add(new Mesh(geo(G.rehaut(radial)), this.rehautMat));
     const idxM = G.indexMatrices();
-    const indices = new InstancedMesh(geo(G.indexBar()), this.trimMat, idxM.length);
-    idxM.forEach((m, i) => indices.setMatrixAt(i, m));
+    const indices = new InstancedMesh(geo(G.batonIndex()), this.trimMat, idxM.length);
+    const lumes = new InstancedMesh(geo(G.indexLume()), lumeMat, idxM.length);
+    idxM.forEach((m, i) => {
+      indices.setMatrixAt(i, m);
+      lumes.setMatrixAt(i, m);
+    });
     indices.instanceMatrix.needsUpdate = true;
-    dialL.add(indices);
+    lumes.instanceMatrix.needsUpdate = true;
+    dialL.add(indices, lumes);
+    if (settings.dots) {
+      const dm = G.halfHourMatrices();
+      const dots = new InstancedMesh(geo(new SphereGeometry(0.014, 16, 10)), this.trimMat, dm.length);
+      dm.forEach((m, i) => dots.setMatrixAt(i, m));
+      dots.instanceMatrix.needsUpdate = true;
+      dialL.add(dots);
+    }
 
     yield;
 
-    /* hands */
-    const handsL = this.layers.hands;
-    this.hour = new Mesh(geo(G.hourHand(cs)), this.trimMat);
+    /* hands: diamond-cut dauphines with a lume spine */
+    this.hour = new Mesh(geo(G.dauphineHand(0.47, 0.045, 0.09, 0.02)), this.trimMat);
+    this.hour.add(new Mesh(geo(G.handLume(0.47, 0.045)), lumeMat));
     this.hour.position.z = 0.13;
-    this.minute = new Mesh(geo(G.minuteHand(cs)), this.trimMat);
+    this.minute = new Mesh(geo(G.dauphineHand(0.7, 0.036, 0.11, 0.016)), this.trimMat);
+    this.minute.add(new Mesh(geo(G.handLume(0.7, 0.036)), lumeMat));
     this.minute.position.z = 0.15;
     this.second = new Mesh(geo(G.secondsHand(cs)), this.trimMat);
     this.second.position.z = 0.172;
@@ -236,73 +386,146 @@ export class WatchModel {
     cap.position.z = 0.185;
     handsL.add(this.hour, this.minute, this.second, cap);
 
-    /* crystal */
-    this.layers.crystal.add(new Mesh(geo(G.crystalDome(seg)), crystalMat));
-    this.layers.crystal.renderOrder = 2;
+    /* crystal (+ the light-sweep shell just above it) */
+    const crystalGeo = geo(G.crystalDome(radial));
+    crystalL.add(new Mesh(crystalGeo, crystalMat));
+    crystalL.renderOrder = 2;
+    if (settings.sweep) {
+      this.sweepTex = tex(sweepTexture(256));
+      this.sweepMat = mat(new MeshBasicMaterial({ map: this.sweepTex, transparent: true, blending: AdditiveBlending, depthWrite: false, opacity: 0 }));
+      // a lighter copy of the dome is enough for a soft additive band
+      const shellBase = G.crystalDome(Math.max(64, radial / 2));
+      this.sweep = new Mesh(geo(G.sweepShell(shellBase)), this.sweepMat);
+      shellBase.dispose();
+      this.sweep.rotation.z = -0.6; // the band crosses the dial diagonally
+      this.sweep.renderOrder = 3;
+      this.sweep.visible = false;
+      crystalL.add(this.sweep);
+    }
 
     yield;
 
     /* movement */
-    const mv = this.layers.movement;
     mv.position.z = -0.1;
     const movementInner = new Group();
     movementInner.position.z = -0.1;
     mv.add(movementInner);
-    movementInner.add(new Mesh(geo(G.mainPlate(seg)), plateMat));
+    movementInner.add(new Mesh(geo(G.mainPlate(radial)), plateMat));
     for (const spec of G.GEARS) {
       const gear = new Mesh(geo(G.gearGeometry(spec, cs)), gearMat);
-      gear.position.set(spec.x, spec.y, 0.008 + spec.z);
+      gear.position.set(spec.x, spec.y, G.SURFACE.gearBase + spec.z);
       gear.userData.speed = spec.speed;
       this.gears.push(gear);
       movementInner.add(gear);
     }
-    const bridges = new Mesh(geo(G.bridgeGeometry(cs)), bridgeMat);
-    bridges.position.z = 0.05;
+    const bridges = new Mesh(geo(G.bridgeGeometry(cs)), [bridgeCapMat, anglageMat]);
+    bridges.position.z = G.SURFACE.bridgeZ;
     movementInner.add(bridges);
     this.balance = new Mesh(geo(G.balanceWheel(cs)), gearMat);
+    this.balance.add(new Mesh(geo(G.hairspring(cs)), bluedMat));
     this.balance.position.set(G.BALANCE.x, G.BALANCE.y, 0.035);
     movementInner.add(this.balance);
-    const jp = G.jewelPositions();
-    const jewels = new InstancedMesh(geo(new SphereGeometry(0.02, 12, 8)), jewelMat, jp.length);
-    const tmp = new Group();
-    jp.forEach((p, i) => {
-      tmp.position.copy(p);
-      tmp.position.z += 0.045;
-      tmp.updateMatrix();
-      jewels.setMatrixAt(i, tmp.matrix);
+
+    // jewels sit 0.004 proud of whatever they are set into; gold chatons ring them
+    const spots = G.jewelSpots();
+    const jewels = new InstancedMesh(geo(new SphereGeometry(0.02, 12, 6)), jewelMat, spots.length);
+    const chatons = settings.chatons ? new InstancedMesh(geo(new TorusGeometry(0.024, 0.005, 6, 20)), gearMat, spots.length) : null;
+    const m4 = new Matrix4();
+    spots.forEach((p, i) => {
+      m4.makeScale(1, 1, 0.6).setPosition(p.x, p.y, p.z - 0.008);
+      jewels.setMatrixAt(i, m4);
+      if (chatons) {
+        m4.makeTranslation(p.x, p.y, p.z + 0.001);
+        chatons.setMatrixAt(i, m4);
+      }
     });
     jewels.instanceMatrix.needsUpdate = true;
     movementInner.add(jewels);
+    if (chatons) {
+      chatons.instanceMatrix.needsUpdate = true;
+      movementInner.add(chatons);
+    }
+    if (settings.screws > 0) {
+      const spotsS = G.SCREWS.slice(0, settings.screws);
+      const screws = new InstancedMesh(geo(G.screwHead()), bluedMat, spotsS.length);
+      spotsS.forEach(([x, y, z], i) => {
+        m4.makeRotationZ(i * 1.7).setPosition(x, y, z - 0.002);
+        screws.setMatrixAt(i, m4);
+      });
+      screws.instanceMatrix.needsUpdate = true;
+      movementInner.add(screws);
+    }
+
+    // ratchet wheel on the back of the plate, sunburst-brushed on high
+    const ratchetMat = settings.anisotropy
+      ? mat(new MeshPhysicalMaterial({ color: "#d6d9de", metalness: 1, roughness: 0.3, anisotropy: 0.8 }))
+      : mat(new MeshStandardMaterial({ color: "#d6d9de", metalness: 1, roughness: 0.3 }));
+    if (aniso) {
+      // same image as the dial's (a clone shares the GPU upload), re-centred on the wheel's UVs
+      const ra = tex(aniso.clone());
+      ra.repeat.set(1 / 0.36, 1 / 0.36);
+      ra.offset.set(0.5, 0.5);
+      (ratchetMat as MeshPhysicalMaterial).anisotropyMap = ra;
+    }
+    const ratchet = new Mesh(geo(G.ratchetGeometry(cs)), ratchetMat);
+    ratchet.position.set(G.RATCHET.x, G.RATCHET.y, G.RATCHET.z);
+    movementInner.add(ratchet);
+
     const rotorGeo = geo(G.rotorGeometry(cs));
     rotorGeo.rotateY(Math.PI); // engraving reads correctly through the caseback
     this.rotor = new Mesh(rotorGeo, rotorMat);
     this.rotor.position.z = -0.1;
-    this.rotor.rotation.z = 0.6;
+    this.rotor.rotation.z = this.rotorSpin;
     movementInner.add(this.rotor);
 
     yield;
 
-    /* caseback */
-    const back = this.layers.caseback;
-    back.add(new Mesh(geo(G.casebackRing(seg)), this.caseMat));
-    back.add(new Mesh(geo(G.casebackGlass(seg)), crystalMat));
+    /* caseback: brushed ring, polished bevel, engraved band, sapphire */
+    back.add(new Mesh(geo(G.casebackRing(radial)), metals));
+    back.add(new Mesh(geo(G.casebackGlass(radial)), crystalMat));
+    const engr = tex(engravingTexture(settings.textureSize, G.ENGRAVING.inner / G.ENGRAVING.outer));
+    const engrMat = metal("brushed", {
+      bumpMap: engr,
+      bumpScale: 1.2,
+      roughnessMap: engr,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    back.add(new Mesh(geo(G.casebackEngraving(radial)), engrMat));
+
+    /* technical-drawing axis through the exploded layers */
+    this.axisMat = mat(new MeshBasicMaterial({ color: "#D2AE6D", transparent: true, opacity: 0, depthWrite: false }));
+    this.axis = new Mesh(geo(G.axisRod()), this.axisMat);
+    this.ticks = new InstancedMesh(geo(G.axisTick()), this.axisMat, LAYER_COUNT);
+    this.axis.visible = this.ticks.visible = false;
+    // its bounding sphere is computed once from the start matrices; the ticks move every frame
+    this.ticks.frustumCulled = false;
+    this.inner.add(this.axis, this.ticks);
 
     yield;
 
-    /* straps: leather ribbon + bracelet links, one of the two is visible */
-    const samples = settings.curveSegments >= 6 ? 48 : 28;
-    const linkGeoC = geo(new RoundedBoxGeometry(0.36, 0.15, 0.1, 2, 0.03));
-    const linkGeoO = geo(new RoundedBoxGeometry(0.3, 0.15, 0.085, 2, 0.028));
+    /* straps: padded leather loft (+ keepers) or bracelet links; one of the two is visible */
+    const ring = settings.loftRing >= 24 ? 16 : settings.loftRing >= 16 ? 14 : 10;
+    const samples = settings.loftSamples;
+    const ls = settings.linkSegments;
+    const linkGeoC = geo(new RoundedBoxGeometry(0.36, 0.15, 0.1, ls, 0.03));
+    const linkGeoO = geo(new RoundedBoxGeometry(0.3, 0.15, 0.085, ls, 0.028));
     for (const sign of [1, -1] as const) {
       const curve = G.strapCurve(sign);
       const holder = sign === 1 ? this.strapTop : this.strapBottom;
-      const ribbon = new Mesh(geo(G.strapGeometry(curve, sign, samples, 1.0, 0.82, 0.1, 0.075, (curve.getLength() / 1.0) * 0.25)), this.strapMat);
-      this.leather.push(ribbon);
-      holder.add(ribbon);
+      const strap = new Mesh(geo(G.strapLoft(curve, sign, ring, samples, 1.0, 0.82, 0.1, 0.075, (curve.getLength() / 1.0) * 0.25)), [this.strapMat, liningMat]);
+      this.leather.push(strap);
+      holder.add(strap);
+      if (sign === -1) {
+        const k = new Mesh(geo(G.keepers(curve, sign, [0.32, 0.42], 1.0, 0.82, 0.1, 0.075, ring)), this.strapMat);
+        this.leather.push(k);
+        holder.add(k);
+      }
       const { centre, outer } = G.braceletMatrices(curve, sign, 0.165);
-      const ci = new InstancedMesh(linkGeoC, this.caseMat, centre.length);
+      const ci = new InstancedMesh(linkGeoC, this.polishedMat, centre.length);
       centre.forEach((m, i) => ci.setMatrixAt(i, m));
-      const oi = new InstancedMesh(linkGeoO, this.braceletOuterMat, outer.length);
+      const oi = new InstancedMesh(linkGeoO, this.brushedMat, outer.length);
       outer.forEach((m, i) => oi.setMatrixAt(i, m));
       ci.instanceMatrix.needsUpdate = true;
       oi.instanceMatrix.needsUpdate = true;
@@ -310,7 +533,33 @@ export class WatchModel {
       holder.add(ci, oi);
     }
     this.showStrapKind(this.strap);
+
+    /* backdrop shadow (all tiers) + glow sprites (high) */
+    const soft = tex(radialTexture(256));
+    this.shadowMat = mat(new MeshBasicMaterial({ map: soft, color: "#000000", transparent: true, depthWrite: false, opacity: 0.5 }));
+    this.shadow = new Mesh(geo(new PlaneGeometry(1, 1)), this.shadowMat);
+    this.shadow.renderOrder = -1;
+    this.root.add(this.shadow);
+    if (settings.glow) {
+      const spots2: [Group, number, number, number][] = [
+        [caseL, 1.285, 0.03, 0.05],
+        [dialL, 0, 0.645, 0.14],
+      ];
+      for (const [parent, x, y, z] of spots2) {
+        const sm = mat(new SpriteMaterial({ map: soft, color: "#ffe9c4", blending: AdditiveBlending, transparent: true, depthWrite: false, opacity: 0.15 }));
+        const sp = new Sprite(sm);
+        sp.position.set(x, y, z);
+        sp.scale.setScalar(0.2);
+        parent.add(sp);
+        this.glows.push(sp);
+      }
+    }
     this.current = config;
+  }
+
+  private roughFor(kind: MetalKind, r: number) {
+    if (this.polishedMat && this.polishedMat === this.brushedMat) return r;
+    return kind === "polished" ? Math.max(0.05, r - 0.06) : Math.min(1, r + 0.12);
   }
 
   private showStrapKind(strap: StrapOption) {
@@ -327,12 +576,19 @@ export class WatchModel {
 
   /** Redraw canvas textures once the web fonts have loaded. */
   redrawText() {
-    drawDial(this.dial, this.dialCanvas.width, this.dialCanvas);
+    drawDial(this.dial, this.dialCanvas.width, this.dialCanvas, this.rays());
     this.dialTex.needsUpdate = true;
     const rotorCanvas = this.rotorTex.image as HTMLCanvasElement;
     const fresh = drawRotor(rotorCanvas.width);
     rotorCanvas.getContext("2d")!.drawImage(fresh, 0, 0);
     this.rotorTex.needsUpdate = true;
+  }
+
+  /** One pass of light across the crystal (medium + high, full motion only). */
+  startSweep(reduced: boolean) {
+    if (!this.sweep || reduced) return;
+    this.sweepT = 0;
+    this.sweep.visible = true;
   }
 
   applyConfig(config: WatchConfig, instant: boolean) {
@@ -345,6 +601,7 @@ export class WatchModel {
     this.caseMetal = c.metalness;
     this.caseCoat = c.clearcoat;
     if (instant) this.snapMaterials();
+    else if (!prev || prev.case !== config.case || prev.dial !== config.dial) this.startSweep(false);
 
     if (!prev || prev.dial !== config.dial) {
       const d = findDial(config.dial);
@@ -370,22 +627,22 @@ export class WatchModel {
 
   private swapDial(d: DialOption) {
     this.dial = d;
-    drawDial(d, this.dialCanvas.width, this.dialCanvas);
+    drawDial(d, this.dialCanvas.width, this.dialCanvas, this.rays());
     this.dialTex.needsUpdate = true;
     this.dialMat.roughness = d.roughness;
     this.dialMat.metalness = d.metalness;
+    if (this.dialMat instanceof MeshPhysicalMaterial) this.dialMat.anisotropy = d.finish === "sunburst" ? 0.8 : 0.001;
     this.rehautMat.color.copy(this.rehautColor);
   }
 
   private snapMaterials() {
-    this.caseMat.color.copy(this.caseColor);
-    this.braceletOuterMat.color.copy(this.caseColor);
+    for (const { m, kind } of this.metals) {
+      m.color.copy(this.caseColor);
+      m.roughness = this.roughFor(kind, this.caseRough);
+      m.metalness = this.caseMetal;
+      if (m instanceof MeshPhysicalMaterial) m.clearcoat = this.caseCoat;
+    }
     this.trimMat.color.copy(this.trimColor);
-    this.caseMat.roughness = this.caseRough;
-    this.caseMat.metalness = this.caseMetal;
-    this.braceletOuterMat.metalness = this.caseMetal;
-    this.braceletOuterMat.roughness = Math.min(1, this.caseRough + 0.18);
-    if ("clearcoat" in this.caseMat) this.caseMat.clearcoat = this.caseCoat;
   }
 
   addYaw(delta: number) {
@@ -394,6 +651,7 @@ export class WatchModel {
 
   private posesFor(vw: number, vh: number, aspect: number) {
     const mobile = aspect < 0.9;
+    this.mobile = mobile;
     const A = this.poseA;
     const B = this.poseB;
     const C = this.poseC;
@@ -437,6 +695,11 @@ export class WatchModel {
       }
     }
 
+    // one light sweep when the configurator comes into view
+    const inConfig = this.a > 0.5 && this.b < 0.5;
+    if (inConfig && !this.wasConfig) this.startSweep(inp.reduced);
+    this.wasConfig = inConfig;
+
     /* pose */
     this.posesFor(inp.vw, inp.vh, inp.aspect);
     const ka = smooth(this.a);
@@ -450,7 +713,11 @@ export class WatchModel {
     let rx = lerp(lerp(A.rx, B.rx, ka), C.rx, kb);
     let ry = lerp(lerp(A.ry, B.ry, ka), C.ry, kb);
     const rz = lerp(lerp(A.rz, B.rz, ka), C.rz, kb);
-    const spread = C.spread * this.e * kb;
+
+    /* exploded view: staggered opening -> caseback reveal -> self-assembly */
+    const tl = explodeTimeline(this.e, inp.reduced, this.tl);
+    const revealRy = -Math.PI + (this.mobile ? 0.6 : 0.35);
+    ry = lerp(ry, revealRy, tl.turn * kb);
 
     // the configurator yaw (drag / buttons) only applies in the configurator
     const yawWeight = ka * (1 - kb);
@@ -464,16 +731,50 @@ export class WatchModel {
       more = true;
     }
 
-    this.root.position.set(x, y, 0);
-    this.root.scale.setScalar(s);
-    this.root.rotation.set(rx, ry, rz);
+    this.rig.position.set(x, y, 0);
+    this.rig.scale.setScalar(s);
+    this.rig.rotation.set(rx, ry, rz);
 
-    const L = this.layers;
-    L.crystal.position.z = LAYER_OFFSETS.crystal * spread;
-    L.hands.position.z = LAYER_OFFSETS.hands * spread;
-    L.dial.position.z = LAYER_OFFSETS.dial * spread;
-    L.movement.position.z = -0.1 + LAYER_OFFSETS.movement * spread;
-    L.caseback.position.z = LAYER_OFFSETS.caseback * spread;
+    // the part in focus lifts a little and grows 3% (opening phase, full motion only)
+    const focus = !inp.reduced && kb > 0.5 && this.e > 0.02 && this.e < REVEAL_START ? activeLayer(this.e) : -1;
+    const spreadK = C.spread * kb;
+    let tickMin = 0;
+    let tickMax = 0;
+    for (let i = 0; i < LAYER_COUNT; i++) {
+      const target = i === focus ? 1 : 0;
+      if (inp.reduced) this.lift[i] = 0;
+      else {
+        const nl = damp(this.lift[i], target, 8, dt);
+        if (Math.abs(nl - target) > 1e-3) more = true;
+        this.lift[i] = Math.abs(nl - target) > 1e-3 ? nl : target;
+      }
+      const off = LAYER_OFFSETS[i];
+      const z = off * spreadK * tl.layer[i] + Math.sign(off) * 0.06 * this.lift[i] * kb;
+      const g = this.layerList[i];
+      g.position.z = (i === 4 ? -0.1 : 0) + z;
+      g.scale.setScalar(1 + 0.03 * this.lift[i] + tl.seat[i]);
+      const tz = g.position.z + LAYER_CENTRES[i];
+      this.tickM.makeTranslation(0, 0, tz);
+      this.ticks.setMatrixAt(i, this.tickM);
+      if (i === 0) tickMax = tz;
+      if (i === LAYER_COUNT - 1) tickMin = tz;
+    }
+    const openAll = tl.open * kb;
+    const axisOn = openAll > 0.05;
+    this.axis.visible = this.ticks.visible = axisOn;
+    if (axisOn) {
+      this.axisMat.opacity = Math.min(0.85, (openAll - 0.05) * 2);
+      this.axis.position.z = (tickMin + tickMax) / 2;
+      this.axis.scale.set(1, 1, Math.max(0.01, tickMax - tickMin + 0.5));
+      this.ticks.instanceMatrix.needsUpdate = true;
+    }
+
+    // backdrop shadow: follows the watch, fades as the layers spread
+    const depth = (7.6 + 2.0) / 7.6;
+    this.shadow.position.set(x, y - 0.14 * s, -2.0 * s);
+    this.shadow.scale.set(2.7 * s * depth, 4.3 * s * depth, 1);
+    this.shadowMat.opacity = 0.5 * (1 - openAll);
+    this.shadow.visible = this.shadowMat.opacity > 0.01;
 
     /* strap swap: the halves slide out, change, and slide back */
     if (this.strapK < 1) {
@@ -485,7 +786,7 @@ export class WatchModel {
       }
       more = true;
     }
-    const strapOut = Math.sin(Math.PI * this.strapK) * 0.9 + this.e * kb * 2.6;
+    const strapOut = Math.sin(Math.PI * this.strapK) * 0.9 + openAll * 2.6;
     this.strapTop.position.y = strapOut;
     this.strapBottom.position.y = -strapOut;
 
@@ -502,22 +803,40 @@ export class WatchModel {
       more = true;
     }
 
-    /* metal cross-fade */
+    /* metal cross-fade (all metal materials follow the case option) */
     const k = 1 - Math.exp(-7 * dt);
-    const cm = this.caseMat;
-    const before = cm.color.r + cm.color.g + cm.color.b + cm.roughness + cm.metalness;
-    cm.color.lerp(this.caseColor, k);
-    this.braceletOuterMat.color.copy(cm.color);
+    let moving = false;
+    for (const { m, kind } of this.metals) {
+      const before = m.color.r + m.color.g + m.color.b + m.roughness + m.metalness;
+      m.color.lerp(this.caseColor, k);
+      m.roughness = damp(m.roughness, this.roughFor(kind, this.caseRough), 7, dt);
+      m.metalness = damp(m.metalness, this.caseMetal, 7, dt);
+      if (m instanceof MeshPhysicalMaterial) m.clearcoat = damp(m.clearcoat, this.caseCoat, 7, dt);
+      const after = m.color.r + m.color.g + m.color.b + m.roughness + m.metalness;
+      if (Math.abs(after - before) > 1e-4) moving = true;
+    }
     this.trimMat.color.lerp(this.trimColor, k);
     this.rehautMat.color.lerp(this.rehautColor, k);
-    cm.roughness = damp(cm.roughness, this.caseRough, 7, dt);
-    cm.metalness = damp(cm.metalness, this.caseMetal, 7, dt);
-    this.braceletOuterMat.metalness = cm.metalness;
-    this.braceletOuterMat.roughness = Math.min(1, cm.roughness + 0.18);
-    if ("clearcoat" in cm) cm.clearcoat = damp(cm.clearcoat, this.caseCoat, 7, dt);
-    const after = cm.color.r + cm.color.g + cm.color.b + cm.roughness + cm.metalness;
     const tr = this.trimMat.color;
-    if (Math.abs(after - before) > 1e-4 || Math.abs(tr.r - this.trimColor.r) + Math.abs(tr.g - this.trimColor.g) > 1e-3) more = true;
+    if (moving || Math.abs(tr.r - this.trimColor.r) + Math.abs(tr.g - this.trimColor.g) > 1e-3) more = true;
+
+    /* light sweep across the crystal, and the glow sprites pulse with it */
+    let pulse = 0;
+    if (this.sweepT >= 0 && this.sweep && this.sweepMat && this.sweepTex) {
+      this.sweepT += dt / 0.9;
+      if (this.sweepT >= 1 || inp.reduced) {
+        this.sweepT = -1;
+        this.sweep.visible = false;
+        this.sweepMat.opacity = 0;
+      } else {
+        const p = smooth(this.sweepT);
+        this.sweepTex.offset.x = lerp(0.62, -0.62, p);
+        pulse = Math.sin(Math.PI * this.sweepT);
+        this.sweepMat.opacity = 0.75 * pulse;
+        more = true;
+      }
+    }
+    for (const g of this.glows) (g.material as SpriteMaterial).opacity = 0.15 + 0.55 * pulse;
 
     /* hands: the visitor's local time */
     const local = Date.now() + this.tzOffset;
@@ -536,17 +855,22 @@ export class WatchModel {
     this.minute.rotation.z = -(((local / 60000) % 60) / 60) * TAU;
     this.hour.rotation.z = -(((local / 3600000) % 12) / 12) * TAU;
 
-    /* the movement runs while it is on show */
+    /* the movement runs while it is on show; the rotor makes half a turn during the caseback reveal */
     if (!inp.reduced && kb > 0.02 && inp.inView) {
       for (const g of this.gears) g.rotation.z += (g.userData.speed as number) * dt * 2.2;
       this.balance.rotation.z = Math.sin(inp.elapsed * TAU * 1.25) * 1.1;
-      this.rotor.rotation.z += dt * 0.25;
+      this.rotorSpin += dt * 0.25;
       more = true;
     }
+    this.rotor.rotation.z = this.rotorSpin + (inp.reduced ? 0 : Math.PI * tl.turnRaw);
     return more;
   }
 
   dispose() {
+    // instanced meshes own GPU buffers for their matrices
+    this.root.traverse((o) => {
+      if (o instanceof InstancedMesh) o.dispose();
+    });
     this.geos.forEach((g) => g.dispose());
     this.mats.forEach((m) => m.dispose());
     this.textures.forEach((t) => t.dispose());

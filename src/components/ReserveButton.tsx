@@ -20,7 +20,7 @@ export default function ReserveButton() {
       <p className="reserve-summary">{summary}</p>
       <p className="config-total">{formatPrice(total)}</p>
       <a className="btn btn-gold w-full sm:w-auto" href={href}>
-        Request this configuration
+        <span className="btn-label">Request this configuration</span>
       </a>
       <p className="text-small text-stone">Concept project — requests go to the designer of this site.</p>
     </div>

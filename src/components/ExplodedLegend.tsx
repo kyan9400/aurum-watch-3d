@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { readStage, type StagePhases } from "@/lib/stage";
+import { activeLayer, subscribeStage } from "@/lib/stage";
 
 const PARTS = [
   { name: "Sapphire crystal", text: "Domed, anti-reflective on both faces." },
@@ -15,24 +15,18 @@ const PARTS = [
 export default function ExplodedLegend() {
   const [active, setActive] = useState(0);
 
-  useEffect(() => {
-    const phases: StagePhases = { toConfig: 0, toExplode: 0, explode: 0 };
-    const onScroll = () => {
-      readStage(phases);
-      setActive(Math.min(PARTS.length - 1, Math.floor(phases.explode * PARTS.length)));
-    };
-    const raf = requestAnimationFrame(onScroll);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", onScroll);
-    };
-  }, []);
+  // same windows as the 3D timeline, so the words and the watch change together
+  useEffect(() => subscribeStage((s) => setActive(Math.min(PARTS.length - 1, activeLayer(s.explode)))), []);
 
   return (
-    <ol className="legend">
+    <ol className="legend" aria-label="Parts of the watch">
       {PARTS.map((p, i) => (
-        <li key={p.name} className="legend-item" data-active={i === active ? "true" : undefined}>
+        <li
+          key={p.name}
+          className="legend-item"
+          data-active={i === active ? "true" : undefined}
+          aria-current={i === active ? "step" : undefined}
+        >
           <span className="legend-num" aria-hidden="true">
             {String(i + 1).padStart(2, "0")}
           </span>

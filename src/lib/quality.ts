@@ -13,12 +13,41 @@ export type TierSettings = {
   curveSegments: number;
   textureSize: number;
   sway: boolean;
+  /** radial segments for the lathed case, bezel, crystal, caseback and dial */
+  radial: number;
+  /** cross-section segments and path samples for lofted lugs and straps */
+  loftRing: number;
+  loftSamples: number;
+  /** physical case metals with anisotropic brushing + sunburst anisotropy map */
+  anisotropy: boolean;
+  iridescence: boolean;
+  /** blued screws in the movement (chatons and half-hour dots follow the tier too) */
+  screws: number;
+  chatons: boolean;
+  dots: boolean;
+  /** perlage texture size on the main plate (0 = flat colour) */
+  perlageSize: number;
+  sweep: boolean;
+  glow: boolean;
+  linkSegments: number;
 };
 
 export const TIERS: Record<Tier, TierSettings> = {
-  high: { dprCap: 2, antialias: true, envResolution: 256, physicalCrystal: true, curveSegments: 10, textureSize: 1024, sway: true },
-  medium: { dprCap: 1.5, antialias: true, envResolution: 128, physicalCrystal: false, curveSegments: 6, textureSize: 1024, sway: true },
-  low: { dprCap: 1, antialias: false, envResolution: 64, physicalCrystal: false, curveSegments: 3, textureSize: 512, sway: false },
+  high: {
+    dprCap: 2, antialias: true, envResolution: 256, physicalCrystal: true, curveSegments: 10, textureSize: 1024, sway: true,
+    radial: 192, loftRing: 24, loftSamples: 48, anisotropy: true, iridescence: true, screws: 10, chatons: true, dots: true,
+    perlageSize: 1024, sweep: true, glow: true, linkSegments: 4,
+  },
+  medium: {
+    dprCap: 1.5, antialias: true, envResolution: 128, physicalCrystal: false, curveSegments: 6, textureSize: 1024, sway: true,
+    radial: 128, loftRing: 16, loftSamples: 32, anisotropy: false, iridescence: false, screws: 6, chatons: true, dots: false,
+    perlageSize: 512, sweep: true, glow: false, linkSegments: 2,
+  },
+  low: {
+    dprCap: 1, antialias: false, envResolution: 64, physicalCrystal: false, curveSegments: 3, textureSize: 512, sway: false,
+    radial: 72, loftRing: 12, loftSamples: 20, anisotropy: false, iridescence: false, screws: 0, chatons: false, dots: false,
+    perlageSize: 0, sweep: false, glow: false, linkSegments: 2,
+  },
 };
 
 function isTier(v: string | null): v is Tier {

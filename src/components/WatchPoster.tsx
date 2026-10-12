@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { findCase, findDial, findStrap } from "@/lib/options";
 import { useConfig } from "@/lib/store";
 
@@ -11,6 +12,38 @@ export default function WatchPoster({ className = "" }: { className?: string }) 
   const d = findDial(config.dial);
   const s = findStrap(config.strap);
   const strapFill = s.kind === "bracelet" ? "url(#poster-links)" : s.color;
+  const hourRef = useRef<SVGPathElement>(null);
+  const minuteRef = useRef<SVGPathElement>(null);
+  const secondRef = useRef<SVGRectElement>(null);
+
+  // the server HTML shows 10:09; after hydration the hands move to local time, refreshed once a minute
+  useEffect(() => {
+    let timer = 0;
+    const set = (el: SVGElement | null, deg: number) => el?.setAttribute("transform", `translate(200 320) rotate(${deg.toFixed(1)})`);
+    const update = () => {
+      const now = new Date();
+      const m = now.getMinutes() + now.getSeconds() / 60;
+      set(hourRef.current, ((now.getHours() % 12) + m / 60) * 30);
+      set(minuteRef.current, m * 6);
+      set(secondRef.current, now.getSeconds() * 6);
+    };
+    const schedule = () => {
+      window.clearTimeout(timer);
+      update();
+      timer = window.setTimeout(schedule, 60000 - (Date.now() % 60000));
+    };
+    const onVisibility = () => {
+      if (document.hidden) window.clearTimeout(timer);
+      else schedule();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const indices = Array.from({ length: 12 }, (_, h) => h).filter((h) => h !== 3);
 
   return (
@@ -79,11 +112,11 @@ export default function WatchPoster({ className = "" }: { className?: string }) 
       <text x="200" y="365" textAnchor="middle" fontFamily="var(--ff-display), Georgia, serif" fontStyle="italic" fontSize="13" fill={d.ink}>
         Meridian
       </text>
-      {/* hands at 10:09 */}
+      {/* hands: 10:09 in the server HTML, local time once hydrated */}
       <g fill={c.trim}>
-        <path d="M0 -50 L6 0 L0 8 L-6 0 Z" transform="translate(200 320) rotate(-55)" />
-        <path d="M0 -74 L5 0 L0 9 L-5 0 Z" transform="translate(200 320) rotate(54)" />
-        <rect x="-1" y="-82" width="2" height="100" transform="translate(200 320) rotate(190)" />
+        <path ref={hourRef} d="M0 -50 L6 0 L0 8 L-6 0 Z" transform="translate(200 320) rotate(-55)" />
+        <path ref={minuteRef} d="M0 -74 L5 0 L0 9 L-5 0 Z" transform="translate(200 320) rotate(54)" />
+        <rect ref={secondRef} x="-1" y="-82" width="2" height="100" transform="translate(200 320) rotate(190)" />
         <circle cx="200" cy="320" r="5" />
       </g>
       {/* crystal glint */}

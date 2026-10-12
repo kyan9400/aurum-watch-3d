@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { probeGPU, wants3D, type Probe } from "@/lib/quality";
-import { readStage, type StagePhases } from "@/lib/stage";
+import { subscribeStage } from "@/lib/stage";
 import WatchPoster from "./WatchPoster";
 
 // three.js + R3F live in this lazy chunk only; the page HTML never waits for it.
@@ -36,20 +36,14 @@ export default function Stage({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // which part of the stage we are in (moves the poster when there is no 3D)
-  useEffect(() => {
-    const phases: StagePhases = { toConfig: 0, toExplode: 0, explode: 0 };
-    const onScroll = () => {
-      readStage(phases);
-      setPhase(phases.toExplode > 0.5 ? "movement" : phases.toConfig > 0.5 ? "configure" : "hero");
-    };
-    const raf = requestAnimationFrame(onScroll);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", onScroll);
-    };
-  }, []);
+  // which part of the stage we are in (moves the poster when there is no 3D); read from the shared scroll store
+  useEffect(
+    () =>
+      subscribeStage((s) => {
+        setPhase(s.toExplode > 0.5 ? "movement" : s.toConfig > 0.5 ? "configure" : "hero");
+      }),
+    [],
+  );
 
   const onReady = useCallback(() => setReady(true), []);
   const onLost = useCallback(() => {

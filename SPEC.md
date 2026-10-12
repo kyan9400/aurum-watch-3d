@@ -21,31 +21,56 @@ type set with care, champagne gold used rarely.
 4. **Calibre AU-28** (`#calibre`): movement specs as a spec sheet.
 5. **The Meridian family** (`#family`): three references with SVG dials drawn in code.
 6. **Atelier** (`#atelier`): the workshop story and four numbers.
-7. **Reserve** (`#reserve`): the commissioning process in three steps and a request button (mailto with the chosen configuration).
-8. **Footer**: motion toggle, contact, "Concept project — fictional brand.", "© 2026 Alhassan Alfarran".
+7. **Ledger** (`#ledger`): three owners' notes (fictional, like the brand) and three atelier facts.
+8. **Reserve** (`#reserve`): the commissioning process in three steps and a request button (mailto with the chosen configuration).
+9. **Footer**: outlined "Aurum" wordmark, back to top, motion toggle, contact, "Concept project — fictional brand.", "© 2026 Alhassan Alfarran".
+
+Page chrome: a 2 px gold scroll-progress bar under the header, section dots on desktop ≥ 1100 px (Hero, Configure,
+Movement, Calibre, Family, Ledger, Reserve), and a header that hides on scroll down past 120 px and returns on scroll up.
+It always stays visible with reduced motion, while focus is inside it, or while the menu is open.
 
 ## 4. Signature 3D moment
 A procedural wristwatch, 100% code-made, on one sticky `<Canvas frameloop="demand">` that spans sections 1–3.
 
 **Geometry (all procedural)**
-- Case middle, bezel, caseback and domed crystal: `LatheGeometry` from hand-drawn 2D profiles.
-- Lugs: `ExtrudeGeometry` from a curved lug shape with bevels. Crown: knurled `CylinderGeometry` + tube.
+- Case middle, bezel, caseback, box-dome crystal and crown body: *lathe runs* (`latheRuns`). Each run is a centripetal
+  Catmull-Rom profile lathed on its own and merged with a material group. The result has smooth normals within a run,
+  hard edges between runs, and u around the circumference (for anisotropic brushing). A 0.004 seam separates the bezel
+  from the case, and another separates the caseback from the case. A dark machined spacer ring sits inside the case.
+- Lugs: `loftSuperellipse` (n = 4) along a Catmull-Rom path. The root sinks 0.04 into the flank and the tip has a fan
+  cap. Groups give brushed flats and polished top bevels.
+- Crown: lathed stem, shoulder and domed cap, with a fluted band `r = r0 + 0.006·smoothstep(cos 36θ)` that has analytic
+  smooth normals, plus an embossed "A" disc (bump map).
 - Dial: disc with a `CanvasTexture` drawn at runtime (sunburst/enamel/grained finish, minute track, brand name in the
   site's display font, date window with today's date). Applied hour indices: `InstancedMesh` (12, double at noon).
-- Hands: dauphine hour/minute hands and a lollipop seconds hand from `Shape` → `ExtrudeGeometry` with bevel.
-- Movement: main plate, gear train (gear `Shape`s with teeth generated in code), balance wheel (torus + spokes), rotor
-  (half-disc extrude), jewels (`InstancedMesh` of small spheres).
-- Strap: custom `BufferGeometry` ribbon swept along a curve that wraps backward like a wrist (top/bottom/sides),
-  leather/fabric look from a canvas texture (grain + stitching / stripes). Steel bracelet: `InstancedMesh` links placed
-  along the same curve.
-- Lighting: drei `<Environment>` with `<Lightformer>` children only (no HDRI download), rendered once.
+- Hands: diamond-cut dauphine hour and minute hands (two sloped facets per side meeting at a spine 0.009 high, with
+  0.008 walls) and lume strips that follow the spine. The seconds hand has a slim blade with a smooth round counterweight.
+- Indices: faceted baton indices with a two-facet roof and a lume inset, plus four applied half-hour dots on high.
+- Movement: a perlage main plate, a gear train (toothed `Shape`s), and bridges with brushed caps and polished anglage
+  sides. Also: a balance wheel with a blued hairspring, blued slotted screws, gold chatons, jewels 0.004 proud, a
+  ratchet wheel and the rotor.
+- Caseback: an engraved band 0.002 proud. One canvas holds height in red and roughness in green.
+- Strap: a padded superellipse loft (n = 6, domed top). Group 0 is the grain face and group 1 is a tan lining. Two
+  keepers sit on the lower strap. Steel bracelet: `InstancedMesh` links placed along the same curve (polished centre
+  links, brushed outer links).
+- Lighting: drei `<Environment>` with `<Lightformer>` children only (no HDRI download), rendered once, including two
+  long strip lights. ACES tone mapping at exposure 1.05, ambient 0.12. A camera-facing gradient quad acts as the
+  backdrop shadow.
+- Materials: polished and brushed case metals. On high both are `MeshPhysicalMaterial`, the brushed one with
+  anisotropy 0.75. The sunburst dial uses an anisotropy map with tangential direction. The crystal has iridescence 0.35.
 
 **Choreography**
 - Hero: watch three-quarter front, hands = real local time, seconds hand ticks once a second with a small spring settle.
 - Configurator: watch turns to face the picker, larger; horizontal drag turns it (`touch-action: pan-y`).
   Metal/dial colours cross-fade over ~0.5 s on change.
-- Exploded: scroll progress drives six layers apart along the watch axis while the watch turns to a side angle; straps
-  slide away. The legend item for the layer in focus is highlighted.
+- Exploded (`explodeTimeline`), across the pinned movement section:
+  - 0–0.62: the layers open one after another (crystal first, each in its own window, 4% overshoot), along a gold axis
+    with ticks. The part in focus lifts a little and grows 3%.
+  - 0.62–0.82: the stack turns to show the sapphire caseback, the engraving and the rotor, which makes half a turn.
+  - 0.82–1: the layers seat back in reverse order, ending at a three-quarter back view.
+  - The straps slide away and return. The legend uses the same windows (`activeLayer`).
+- Intro: the environment ramps from 0.15 to 1 over 1.4 s as the poster fades. A light sweep crosses the crystal on intro,
+  on dial or case changes and on entering the configurator. On high, glow sprites pulse with the sweep.
 
 **Performance**
 - Render on demand: frames only for ticks (≈12 frames per second-tick), colour fades, scroll changes, drag, and the
@@ -54,16 +79,20 @@ A procedural wristwatch, 100% code-made, on one sticky `<Canvas frameloop="deman
   hydration, and not at all on a software renderer (SwiftShader / llvmpipe / Basic Render, or a
   `failIfMajorPerformanceCaveat` refusal): those keep the poster. `?quality=` forces the 3D on.
 - Quality tier picked before the Canvas from a probe context (GPU name, cores, memory, touch). `?quality=` overrides.
-  - **High**: DPR cap 2, MSAA, physical crystal with clearcoat, env map 256, 32-segment gears, 40 bracelet links.
-  - **Medium**: DPR cap 1.5, MSAA, standard crystal, env 128, 20-segment gears.
-  - **Low**: DPR cap 1, no MSAA, env 64, simplified gears, no sway.
+  - **High**: DPR cap 2, MSAA, env 256, radial 192, loft 24/48, physical + anisotropic metals, iridescent crystal,
+    10 screws, chatons, half-hour dots, perlage 1024, light sweep, glow sprites (≈82k triangles).
+  - **Medium**: DPR cap 1.5, MSAA, env 128, radial 128, loft 16/32, standard metals with a roughness split, 6 screws,
+    chatons, perlage 512, light sweep (≈49k triangles).
+  - **Low**: DPR cap 1, no MSAA, env 64, radial 72, loft 12/20, one metal, flat plate, no sweep, no sway (≈24k triangles).
+  - All tiers: backdrop shadow quad.
 - drei `<PerformanceMonitor>` drops DPR on decline. No allocations in `useFrame`. The watch is built in slices that
   yield to the main thread; shaders warmed with `gl.compileAsync` behind the poster, canvas fades in (opacity) after.
 - IntersectionObserver pauses everything when the stage is off-screen; `visibilitychange` pauses the tick timer.
 
 **Reduced motion** (default when the OS asks; "Turn on full motion" toggle in the header strip and footer, stored in
 localStorage, `?motion=full|reduced`): no idle sway, no camera sweeps between sections (poses cut), seconds hand jumps
-without the spring. The exploded view still follows the scroll directly.
+without the spring. The exploded view still follows the scroll directly, with no overshoot, lift, rotor spin, light
+ramp or sweep. There are no heading reveals, no cursor ring and no magnetic buttons.
 
 **No WebGL / context lost**: a code-made SVG poster of the watch (same palette) is in the server HTML, shown until the
 3D is ready and kept if WebGL is missing, the renderer is software-only, or the context is lost. The configurator still works (the poster recolours).
@@ -85,8 +114,16 @@ without the spring. The exploded view still follows the scroll directly.
 **Fonts** (Google Fonts, OFL, via `next/font`): **Cormorant Garamond** 500/600 italic for display, **Manrope** 400/500/600
 for body and UI. Figures in specs use Manrope tabular numbers.
 
-**Type scale** (fluid): display `clamp(2.75rem, 7vw, 6.5rem)`, h2 `clamp(2rem, 4.2vw, 3.75rem)`, h3 1.375rem,
-body 1rem/1.65, small 0.8125rem with 0.14em tracking uppercase for eyebrows.
+**Type scale** (fluid): display `clamp(3rem, 8.6vw, 8.75rem)` / 0.9, three static lines (middle line indented 0.6em on
+≥ 900 px); h2 `clamp(2.25rem, 5.2vw, 4.75rem)` / 0.98; h3 1.375rem; body 1rem/1.65; small 0.8125rem; eyebrows are
+uppercase with 0.16em tracking and a 24 px gold-deep hairline before the text.
+
+**Layout**: Calibre and Atelier use a 12-column grid at ≥ 1100 px, with the heading in columns 1–6 and the body in
+columns 8–12 (asymmetric on purpose). Section padding is `clamp(64px, 12vw, 176px)`.
+
+**Motion (2D)**: transform and opacity only. Section headings reveal per line (masked, 70 ms stagger), and ledes, rows and
+cards fade up 16 px. The H1 never animates. Spec rows draw a gold hairline on hover. Family cards lift 6 px, the mini
+dial turns 6°, and a top hairline grows.
 
 **Spacing scale** (4 px base): 4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 160. Section padding 96–160 px desktop, 64–96 mobile.
 Gutter 16 px mobile, 32 px tablet, 64 px desktop. Max text measure 34rem.
@@ -143,8 +180,17 @@ Gutter 16 px mobile, 32 px tablet, 64 px desktop. Max text measure 34rem.
   Meridian is signed inside the caseback by the watchmaker who built it, and returns to the same hands for service.
 - Numbers: 1911 founded · 340 watches a year · 214 parts per movement · 14 weeks from order to wrist.
 
+**Ledger**
+- Eyebrow: 06 — The ledger
+- H2: Kept, not collected.
+- Notes: "I wound it on the train home and forgot about it for three days. It was still right." — Owner of a Classique,
+  Lyon · "My watchmaker's name is on the caseback. Twelve years later, the same hands opened it for service." — Owner of
+  a Nocturne, Edinburgh · "It's the only object I own that gets quieter the longer you look at it." — Owner of a
+  Solstice, Kyoto.
+- Facts: Lifetime service record · Same watchmaker for every service · 340 a year, and never more.
+
 **Reserve**
-- Eyebrow: 06 — Reserve
+- Eyebrow: 07 — Reserve
 - H2: Begin a commission.
 - Steps: 1 Send us your configuration. 2 Meet your watchmaker, in the atelier or by video. 3 Collect your Meridian in
   fourteen weeks, with a lifetime service record.
@@ -168,6 +214,10 @@ No external images, models, HDRIs or audio. No runtime CDN requests.
 - Route first-load JS < 250 KB gzip (target < 160 KB) excluding the lazy 3D chunk; three + R3F + drei only in the lazy chunk.
 - No GSAP/Lenis: native scroll, the only smoothing is a short damp inside the 3D scene (one layer).
 - LCP = hero H1 text (server rendered, fonts `display: swap`); 3D never blocks it.
-- 3D chunk ≤ 300 KB gzip; geometry < 60k triangles on high, < 30k on low. Two canvas textures ≤ 1024².
+- 3D chunk ≤ 300 KB gzip; geometry ≤ 90k triangles on high, ≤ 50k on medium, ≤ 25k on low. Canvas textures ≤ 1024²,
+  small ones (64–256 px) for the shadow, sweep and emblem.
+- Exactly two font preloads (Cormorant normal + italic). One scroll listener for the whole page.
+- Structured data: `WebSite` + `CreativeWork` JSON-LD (no Product/Offer). Headers: nosniff, strict-origin referrer,
+  a restrictive Permissions-Policy.
 - Idle GPU: 0 frames when nothing moves (reduced motion) / sway only while stage visible (full motion).
 - Lighthouse mobile ≥ 85 perf, ≥ 95 a11y / best practices / SEO. No CLS from the canvas (fixed-size sticky stage).
