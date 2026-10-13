@@ -407,12 +407,10 @@ export class WatchModel {
 
     yield;
 
-    /* hands: diamond-cut dauphines with a lume spine */
-    this.hour = new Mesh(geo(G.dauphineHand(0.47, 0.045, 0.09, 0.02)), this.trimMat);
-    this.hour.add(new Mesh(geo(G.handLume(0.47, 0.045)), lumeMat));
+    /* hands: skeletonised diamond-cut dauphines, so the open heart and the dial text read through them */
+    this.hour = new Mesh(geo(G.dauphineHand(0.47, 0.045, 0.09, 0.02, 0.0125)), this.trimMat);
     this.hour.position.z = 0.13;
-    this.minute = new Mesh(geo(G.dauphineHand(0.7, 0.036, 0.11, 0.016)), this.trimMat);
-    this.minute.add(new Mesh(geo(G.handLume(0.7, 0.036)), lumeMat));
+    this.minute = new Mesh(geo(G.dauphineHand(0.7, 0.036, 0.11, 0.016, 0.0105)), this.trimMat);
     this.minute.position.z = 0.15;
     this.second = new Mesh(geo(G.secondsHand(cs)), this.trimMat);
     this.second.position.z = 0.172;

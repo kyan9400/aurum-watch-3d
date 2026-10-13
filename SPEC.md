@@ -43,8 +43,10 @@ A procedural wristwatch, 100% code-made, on one sticky `<Canvas frameloop="deman
   smooth normals, plus an embossed "A" disc (bump map).
 - Dial: disc with a `CanvasTexture` drawn at runtime (sunburst/enamel/grained finish, minute track, brand name in the
   site's display font, date window with today's date). Applied hour indices: `InstancedMesh` (12, double at noon).
-- Hands: diamond-cut dauphine hour and minute hands (two sloped facets per side meeting at a spine 0.009 high, with
-  0.008 walls) and lume strips that follow the spine. The seconds hand has a slim blade with a smooth round counterweight.
+- Hands: skeletonised diamond-cut dauphine hour and minute hands (two sloped facets per side meeting at a spine 0.009
+  high, with 0.008 walls; a triangular window cut through each blade leaves a polished frame 0.0125 / 0.0105 wide), so
+  the open heart and the dial text read through them at any hour. Dial text sits higher (AURUM −0.5 R, Meridian
+  −0.29 R) to keep it clear of the hand hub. The seconds hand has a slim blade with a smooth round counterweight.
 - Indices: faceted baton indices with a two-facet roof and a lume inset, plus four applied half-hour dots on high.
 - Movement: a perlage main plate, a gear train (toothed `Shape`s), and bridges with brushed caps and polished anglage
   sides. Also: a balance wheel with a blued hairspring, blued slotted screws, gold chatons, jewels 0.004 proud, a
@@ -108,7 +110,9 @@ localStorage, `?motion=full|reduced`): no idle sway, no camera sweeps between se
 without the spring. The exploded view still follows the scroll directly, with no overshoot, lift, rotor spin, light
 ramp or sweep. There are no heading reveals, no cursor ring and no magnetic buttons.
 
-**No WebGL / context lost**: a code-made SVG poster of the watch (same palette) is in the server HTML, shown until the
+**No WebGL / context lost**: a code-made SVG poster of the watch (same palette, open heart with balance and blued
+hairspring, skeletonised hands, amber halo, tilted Roman chapter ring and light shaft behind; sized so its watch matches
+the 3D hero's) is in the server HTML, shown until the
 3D is ready and kept if WebGL is missing, the renderer is software-only, or the context is lost. The configurator still works (the poster recolours).
 
 ## 5. Design system

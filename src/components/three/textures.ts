@@ -130,13 +130,13 @@ export function drawDial(dial: DialOption, size: number, canvas?: HTMLCanvasElem
   // brand
   ctx.textBaseline = "middle";
   ctx.font = `600 ${Math.round(size * 0.07)}px ${fonts.display}`;
-  spacedText(ctx, "AURUM", 0, -R * 0.44, size * 0.012);
+  spacedText(ctx, "AURUM", 0, -R * 0.5, size * 0.012);
   ctx.font = `500 ${Math.round(size * 0.019)}px ${fonts.sans}`;
   ctx.globalAlpha = 0.8;
-  spacedText(ctx, "HORLOGERIE  ·  1911", 0, -R * 0.32, size * 0.006);
+  spacedText(ctx, "HORLOGERIE  ·  1911", 0, -R * 0.385, size * 0.006);
   ctx.globalAlpha = 1;
   ctx.font = `italic 500 ${Math.round(size * 0.042)}px ${fonts.display}`;
-  spacedText(ctx, "Meridian", 0, -R * 0.2, size * 0.002);
+  spacedText(ctx, "Meridian", 0, -R * 0.29, size * 0.002);
 
   // open-heart aperture at 6 o'clock: a bevelled shadow ring, then cut through (alphaTest drops it)
   const ax = (APERTURE.x / 0.805) * R;

@@ -608,7 +608,8 @@
     position: absolute;
     left: 0;
     top: 50%;
-    height: min(80svh, 760px);
+    /* sized so the poster's watch matches the 3D watch it cross-fades into */
+    height: min(130svh, 1240px);
     transform: translate(calc(72vw - 50%), -50%);
     transition:
       transform 0.9s cubic-bezier(0.6, 0, 0.2, 1),

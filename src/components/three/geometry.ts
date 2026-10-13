@@ -506,7 +506,9 @@ const HAND_WALL = 0.008;
 const HAND_RIDGE = 0.009;
 
 /** Dauphine hand: 0.008 side walls and a diamond-cut top (two sloped planes meeting at a raised spine). */
-export function dauphineHand(len: number, halfWidth: number, tail: number, tailHalf: number) {
+/** Diamond-cut dauphine hand. With `frame` > 0 the blade is skeletonised: a triangular window is cut
+    through it, leaving a polished frame `frame` wide, so the dial, its text and the open heart read through. */
+export function dauphineHand(len: number, halfWidth: number, tail: number, tailHalf: number, frame = 0) {
   const f = new Facets();
   const y0 = 0.02;
   const ze = HAND_WALL;
@@ -519,15 +521,57 @@ export function dauphineHand(len: number, halfWidth: number, tail: number, tailH
   const mid = [0, y0, zr];
   const back = [0, -tail, zr * 0.92];
   const up = [0, 0, 1];
-  // blade facets
-  f.tri(tip, L, mid, up);
-  f.tri(tip, mid, R, up);
+  const down = [0, 0, -1];
+  // the roof is two planes meeting at the spine: z = ridge(y) - RIDGE·|x| / halfWidth
+  const roofZ = (x: number, y: number) => zr + ((ze - zr) * (y - y0)) / (len - y0) - (HAND_RIDGE * Math.abs(x)) / halfWidth;
+  const hwAt = (y: number) => (halfWidth * (len - y)) / (len - y0);
+  if (frame > 0) {
+    // window: base at ya (flat), apex where the inset edges meet on the spine
+    const ya = y0 + frame * 4.5;
+    const yb = len - (frame * (len - y0)) / halfWidth;
+    const a = hwAt(ya) - frame;
+    const TI = [0, yb, roofZ(0, yb)];
+    const B0 = [0, ya, roofZ(0, ya)];
+    for (const sx of [-1, 1]) {
+      const O = sx < 0 ? L : R;
+      const BI = [sx * a, ya, roofZ(sx * a, ya)];
+      // roof plane on this side, minus its half of the window
+      f.tri(tip, O, BI, up);
+      f.tri(tip, BI, TI, up);
+      f.tri(O, mid, B0, up);
+      f.tri(O, B0, BI, up);
+      // underside, same outline at z = 0
+      const z0 = (p: number[]) => [p[0], p[1], 0];
+      f.tri(z0(tip), z0(O), z0(BI), down);
+      f.tri(z0(tip), z0(BI), z0(TI), down);
+      f.tri(z0(O), z0(mid), z0(B0), down);
+      f.tri(z0(O), z0(B0), z0(BI), down);
+      // window walls, facing into the opening
+      const cy = (ya + yb) / 2;
+      const wall = (p: number[], q: number[]) => {
+        const mx = (p[0] + q[0]) / 2;
+        const my = (p[1] + q[1]) / 2;
+        f.quad([p[0], p[1], 0], [q[0], q[1], 0], q, p, [-mx, cy - my, 0]);
+      };
+      wall(BI, B0);
+      wall(TI, BI);
+    }
+    f.tri([-halfWidth, y0, 0], [-tailHalf, -tail, 0], [tailHalf, -tail, 0], down);
+    f.tri([-halfWidth, y0, 0], [tailHalf, -tail, 0], [halfWidth, y0, 0], down);
+  } else {
+    // blade facets
+    f.tri(tip, L, mid, up);
+    f.tri(tip, mid, R, up);
+    f.tri([0, len, 0], [-halfWidth, y0, 0], [-tailHalf, -tail, 0], down);
+    f.tri([0, len, 0], [-tailHalf, -tail, 0], [tailHalf, -tail, 0], down);
+    f.tri([0, len, 0], [tailHalf, -tail, 0], [halfWidth, y0, 0], down);
+  }
   // counterweight facets (same spine)
   f.quad(L, TL, back, mid, up);
   f.quad(R, mid, back, TR, up);
   // tail end gable
   f.tri(TL, TR, back, [0, -1, 0]);
-  // walls + flat underside
+  // outer walls
   const outline = [
     [0, len],
     [-halfWidth, y0],
@@ -536,36 +580,6 @@ export function dauphineHand(len: number, halfWidth: number, tail: number, tailH
     [halfWidth, y0],
   ];
   f.walls(outline, 0, ze);
-  const down = [0, 0, -1];
-  f.tri([0, len, 0], [-halfWidth, y0, 0], [-tailHalf, -tail, 0], down);
-  f.tri([0, len, 0], [-tailHalf, -tail, 0], [tailHalf, -tail, 0], down);
-  f.tri([0, len, 0], [tailHalf, -tail, 0], [halfWidth, y0, 0], down);
-  return f.build();
-}
-
-/** Lume strip down a dauphine hand's spine, following the two roof slopes 0.0015 above them. */
-export function handLume(len: number, halfWidth: number) {
-  const f = new Facets();
-  const y0 = 0.02;
-  const ze = HAND_WALL;
-  const zr = HAND_WALL + HAND_RIDGE;
-  const half = Math.min(0.006, halfWidth * 0.18);
-  const ya = y0 + 0.06;
-  const yb = y0 + (len - y0) * 0.62;
-  const steps = 6;
-  const at = (y: number, x: number) => {
-    const k = (y - y0) / (len - y0);
-    const ridge = zr + (ze - zr) * k;
-    const hw = halfWidth * (1 - k);
-    return [x, y, ridge - ((ridge - ze) * Math.abs(x)) / hw + 0.0015];
-  };
-  const up = [0, 0, 1];
-  for (let i = 0; i < steps; i++) {
-    const y1 = ya + ((yb - ya) * i) / steps;
-    const y2 = ya + ((yb - ya) * (i + 1)) / steps;
-    f.quad(at(y1, -half), at(y1, 0), at(y2, 0), at(y2, -half), up);
-    f.quad(at(y1, 0), at(y1, half), at(y2, half), at(y2, 0), up);
-  }
   return f.build();
 }
 
