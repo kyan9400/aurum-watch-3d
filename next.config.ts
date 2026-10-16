@@ -13,6 +13,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // lazily loaded 3D fetches public/ files (the 1911 pocket watch, its studio HDRI) and needs the Pages sub-path
+  env: { NEXT_PUBLIC_BASE_PATH: isPages ? PAGES_BASE : "" },
   ...(isPages
     ? {
         // static export: no server, so no custom headers

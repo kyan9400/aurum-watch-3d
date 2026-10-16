@@ -105,8 +105,8 @@ A procedural wristwatch, 100% code-made, on one sticky `<Canvas frameloop="deman
   yield to the main thread; shaders warmed with `gl.compileAsync` behind the poster, canvas fades in (opacity) after.
 - IntersectionObserver pauses everything when the stage is off-screen; `visibilitychange` pauses the tick timer.
 
-**Reduced motion** (default when the OS asks; "Turn on full motion" toggle in the header strip and footer, stored in
-localStorage, `?motion=full|reduced`): no idle sway, no camera sweeps between sections (poses cut), seconds hand jumps
+**Reduced motion** (opt-in: full motion is the default even when the OS asks; the "Reduce motion" toggle in the header
+strip and footer is stored in localStorage and respected later, `?motion=full|reduced`): no idle sway, no camera sweeps between sections (poses cut), seconds hand jumps
 without the spring. The exploded view still follows the scroll directly, with no overshoot, lift, rotor spin, light
 ramp or sweep. There are no heading reveals, no cursor ring and no magnetic buttons.
 

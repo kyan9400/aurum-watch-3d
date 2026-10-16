@@ -1,9 +1,9 @@
 "use client";
 
 /* Motion preference.
-   The OS "reduce motion" setting is respected by default, but many people turn animations off for speed,
-   not comfort, so the visitor can switch full motion back on. The choice is remembered in localStorage;
-   ?motion=full / ?motion=reduced in the URL overrides it. */
+   The site starts in full motion on a first visit, even when the OS asks for reduced motion (many people turn
+   animations off for speed, not comfort). "Reduce motion" switches it off; the choice is remembered in localStorage
+   and respected on later visits. ?motion=full / ?motion=reduced in the URL overrides it. */
 
 import { useSyncExternalStore } from "react";
 
@@ -31,7 +31,7 @@ function getState(): MotionState {
   if (!state) {
     const systemReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const choice = readChoice();
-    const reduced = choice === "full" ? false : choice === "reduced" ? true : systemReduced;
+    const reduced = choice === "reduced";
     state = { reduced, systemReduced, choice };
     document.documentElement.classList.toggle("reduce-motion", reduced);
   }

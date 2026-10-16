@@ -53,7 +53,7 @@ export const viewport: Viewport = {
 };
 
 /* Runs before paint so CSS knows the visitor's motion choice (and that JS runs) on the very first frame. */
-const MOTION_BOOT = `(function(){try{var d=document.documentElement;d.classList.add("js");var u=new URLSearchParams(location.search).get("motion"),s=null;try{s=localStorage.getItem("aurum-motion")}catch(e){}var c=(u==="full"||u==="reduced")?u:s;var r=c==="full"?false:c==="reduced"?true:matchMedia("(prefers-reduced-motion: reduce)").matches;d.classList.toggle("reduce-motion",r)}catch(e){}})();`;
+const MOTION_BOOT = `(function(){try{var d=document.documentElement;d.classList.add("js");var u=new URLSearchParams(location.search).get("motion"),s=null;try{s=localStorage.getItem("aurum-motion")}catch(e){}var c=(u==="full"||u==="reduced")?u:s;var r=c==="reduced";d.classList.toggle("reduce-motion",r)}catch(e){}})();`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

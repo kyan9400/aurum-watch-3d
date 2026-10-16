@@ -6,6 +6,7 @@ import ReserveButton from "@/components/ReserveButton";
 import MiniDial from "@/components/MiniDial";
 import MobileMenu from "@/components/MobileMenu";
 import { MotionNotice, MotionToggle } from "@/components/MotionToggle";
+import HeritagePiece from "@/components/HeritagePiece";
 import Reveal from "@/components/Reveal";
 import ScrollChrome from "@/components/ScrollChrome";
 import Pointer from "@/components/Pointer";
@@ -309,6 +310,7 @@ export default function Home() {
               <h2 id="atelier-title" className="h2" data-reveal>
                 <Lines lines={["Eleven watchmakers.", "One name on each watch."]} />
               </h2>
+              <HeritagePiece />
             </div>
             <div className="split-body">
               <p className="lede" data-reveal="fade">

@@ -75,9 +75,20 @@ A procedural wristwatch on one sticky `<Canvas frameloop="demand">` spanning the
 - Desktop pointer extras (fine pointer and full motion only): magnetic buttons and a companion cursor ring that shows
   "Drag" over the configurator. The native cursor stays visible.
 
+### Real object: Meridian No. 1 (1911)
+- The atelier section shows the house's first piece, a real scanned pocket watch (Poly Haven "Vintage Pocket Watch",
+  CC0), on a slow turntable in its own small R3F scene, lit by a real studio HDRI (Poly Haven "Studio Small 08", CC0,
+  1K). Both files are served from `public/` (≈ 0.3 MB glTF with meshopt + WebP textures, 1.5 MB HDRI).
+- It never touches the hero: the chunk, the model and the HDRI are requested only after window `load`, when the
+  atelier comes within ~900 px of the viewport, and only on real GPU hardware. A still render (`pocket-watch-1911.webp`,
+  28 KB, lazy) shows until the shaders are compiled, and stays as the fallback. The scene renders only while on screen
+  and holds a still three-quarter view with reduced motion.
+- glTF is decoded with three's local `MeshoptDecoder`; no Draco, no CDN.
+
 ### Motion & fallbacks
-- `prefers-reduced-motion` is respected by default, with a "Turn on full motion" toggle (header, footer and a first-visit
-  notice), remembered in localStorage; `?motion=full|reduced` overrides. Reduced motion cuts between poses, stops the
+- Full motion by default on a first visit, even when the OS asks for reduced motion; a "Reduce motion" / "Turn on full
+  motion" toggle (header, footer, and a first-visit notice when the OS setting is on) is remembered in localStorage and
+  respected on later visits; `?motion=full|reduced` overrides. Reduced motion cuts between poses, stops the
   sway and the movement animation, and lets the seconds hand jump. The exploded view still follows the scroll.
 - Without WebGL, on a software renderer, or if the context is lost, the SVG poster stays and follows the configurator, so the page works fully.
 

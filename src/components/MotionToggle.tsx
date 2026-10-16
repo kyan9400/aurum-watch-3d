@@ -16,19 +16,19 @@ export function MotionToggle({ className = "" }: { className?: string }) {
   );
 }
 
-/** First visit with the OS setting on: say why things are calm and offer full motion. */
+/** First visit with the OS reduce-motion setting on: the site still starts in full motion, so offer the calm version. */
 export function MotionNotice() {
   const { systemReduced, choice } = useMotion();
   if (!systemReduced || choice) return null;
   return (
     <div className="motion-notice" role="region" aria-label="Motion preference">
-      <p>Animations are calmed to match your system setting.</p>
+      <p>Full motion is on. Your system asks for reduced motion — you can switch it off here.</p>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn btn-gold" onClick={() => setMotionChoice("full")}>
-          Turn on full motion
+        <button type="button" className="btn btn-gold" onClick={() => setMotionChoice("reduced")}>
+          Reduce motion
         </button>
-        <button type="button" className="btn btn-ghost" onClick={() => setMotionChoice("reduced")}>
-          Keep it calm
+        <button type="button" className="btn btn-ghost" onClick={() => setMotionChoice("full")}>
+          Keep full motion
         </button>
       </div>
     </div>
